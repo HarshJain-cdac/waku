@@ -92,7 +92,7 @@ def record(conn: sqlite3.Connection, *, kind: str, name: str, status: str, effec
     """One row, as the acting caller (case.current()). Raises if it cannot be
     written: an action that cannot be audited does not count as done."""
     ensure(conn)
-    actor = case.current()
+    actor = _actor()
     text = json.dumps(detail or {}, sort_keys=True, default=str)
     if len(text) > DETAIL_CAP:
         text = json.dumps({"truncated": True, "preview": text[:DETAIL_CAP - 100]})
@@ -148,3 +148,11 @@ def events(conn: sqlite3.Connection, *, run_id: str = "", case_id: str = "",
     rows = conn.execute(sql + " ORDER BY id", args).fetchall()
     return [{**dict(zip(_KEYS, r[:-1], strict=True)), "detail": json.loads(r[-1])}
             for r in rows]
+
+
+def _actor():
+    """Who acts: the PR Creation Flow's actor for a chat turn (case.acting),
+    else the harness API's (store.acting), else this machine's officer."""
+    from waku.nam import store
+
+    return case._ACTOR.get() or store.current()

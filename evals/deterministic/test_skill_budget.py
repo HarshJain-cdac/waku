@@ -2,9 +2,9 @@
 skill is read by the model on that turn: a lean skill is a faster, cheaper
 and more focused answer.
 
-Waku ships two skills, autonomous-work and waku-memory (skills/); a skill
-may be split into topics so a message loads only the topics it names
-(loader.Skill.focus).
+Waku ships four skills: autonomous-work and waku-memory (skills/), and
+nam-documents and nrl-procurement (waku/nam/skills/), which are split into
+topics so a message loads only the topics it names (loader.Skill.focus).
 Budgets, at ~4 characters a token, on what is actually loaded:
 
   a skill without topics                 <= 400 tokens, loaded whole
@@ -24,7 +24,7 @@ import pytest
 from waku.memory.procedural.loader import SkillLoader
 
 ROOT = Path(__file__).resolve().parents[2]
-DIRS = [ROOT / "skills"]
+DIRS = [ROOT / "skills", ROOT / "waku" / "nam" / "skills"]
 LOADER = SkillLoader(DIRS)
 PATHS = sorted(p for d in DIRS for p in d.rglob("SKILL.md"))
 
@@ -33,8 +33,9 @@ def tokens(text: str) -> int:
     return len(text) // 4
 
 
-def test_waku_ships_exactly_two_skills():
-    assert sorted(s.name for s in LOADER.skills) == ["autonomous-work", "waku-memory"]
+def test_waku_ships_exactly_four_skills():
+    assert sorted(s.name for s in LOADER.skills) == [
+        "autonomous-work", "nam-documents", "nrl-procurement", "waku-memory"]
 
 
 @pytest.mark.parametrize("skill", LOADER.skills, ids=lambda s: s.name)

@@ -138,9 +138,42 @@ class Settings:
     # Only NRL procurement work is answered (waku/nam/domain.py): "" (the
     # default) means on wherever kg_url is set; "1" on anywhere, "0" off.
     domain_only: str = field(default_factory=lambda: os.getenv("WAKU_DOMAIN_ONLY", "").strip())
+    # Where NAM's need capture reads from (waku/nam/sap_need.py): "tender"
+    # (the default) narrows the past tenders; "sap" narrows SAP's PR and PO
+    # lines (sap_search) to one material, with its last PR, PO and PUR case.
+    nam_source: str = field(default_factory=lambda: os.getenv("WAKU_NAM_SOURCE", "").strip())
+    # What NAM is in the chat: "flow" (the default), the PR Creation Flow the
+    # agent works with its tools (waku/nam/flow.py); "driver", the earlier
+    # need-capture driver that runs in code (waku/nam/drive.py), for clients
+    # built on it. The harness API (/api/nam/*, waku nam-api) serves both.
+    nam_chat: str = field(default_factory=lambda: os.getenv("WAKU_NAM_CHAT", "flow").strip())
+    # The NAM harness API (`waku nam-api`, waku/nam/api.py). Loopback by
+    # default: identity and roles arrive from the trusted component that
+    # authenticates callers (docs/nam/plan.md D4), so only it should reach
+    # this port. The body cap is checked before a byte of the body is read.
+    nam_host: str = field(default_factory=lambda: os.getenv("WAKU_NAM_HOST", "127.0.0.1"))
+    nam_port: int = field(default_factory=lambda: int(os.getenv("WAKU_NAM_PORT", "7788")))
+    nam_max_body: int = field(
+        default_factory=lambda: int(os.getenv("WAKU_NAM_MAX_BODY", str(1024 * 1024)))
+    )
+    # Documents (waku/nam/docs/): the upload cap, the OCR engine as
+    # "module:Class" (none by default: pages without text are marked so), and
+    # how many letters and digits a page needs before its text counts.
+    nam_max_doc: int = field(
+        default_factory=lambda: int(os.getenv("WAKU_NAM_MAX_DOC", str(25 * 1024 * 1024)))
+    )
+    nam_ocr_backend: str = field(
+        default_factory=lambda: os.getenv("WAKU_NAM_OCR_BACKEND", "").strip()
+    )
+    nam_ocr_min_chars: int = field(
+        default_factory=lambda: int(os.getenv("WAKU_NAM_OCR_MIN_CHARS", "20"))
+    )
     # The model per NAM task, in the order tried: "domain=m1,m2"
     # (waku/nam/llm.py). A task left out gets the small model then the main.
     nam_models: str = field(default_factory=lambda: os.getenv("WAKU_NAM_MODELS", "").strip())
+    # Calls (run, document upload or update) per tenant and user per minute;
+    # 0 turns the limit off. Over it: 429 rate_limited, retryable.
+    nam_rate: int = field(default_factory=lambda: int(os.getenv("WAKU_NAM_RATE", "120")))
     # Answer a pure greeting ("hi", "thanks", "ok") from the intent node, with
     # no model call at all. On by default because the inference endpoint here
     # queues — one call has been measured between 1.6s and 21s — and making

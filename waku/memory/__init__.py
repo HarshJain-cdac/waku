@@ -39,7 +39,12 @@ def bundled_skill_dirs() -> list[Path]:
     double-load, it is "wherever you installed from, the skills came too".
     """
     here = Path(__file__).resolve()
-    return [p for p in (here.parents[1] / "skills", here.parents[2] / "skills") if p.is_dir()]
+    # the NAM knowledge skills (PQC, SCC, specification, BOQ, approval note,
+    # extraction) live with the NAM harness, which loads them too
+    # (waku/nam/skillset.py): one copy, so the chat and the harness cannot
+    # disagree about what a PQC is. They ship inside the package.
+    return [p for p in (here.parents[1] / "skills", here.parents[2] / "skills",
+                        here.parents[1] / "nam" / "skills") if p.is_dir()]
 
 
 class Memory:

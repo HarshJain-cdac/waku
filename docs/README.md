@@ -36,7 +36,9 @@ into four groups.
 | [memory-backends-playbook.md](memory-backends-playbook.md) | seeing your memories in each provider's own console |
 | [benchmarks.md](benchmarks.md) | what has been measured, and how |
 | [integrations.md](integrations.md) | voice, Telegram, Apple, Google Calendar, MCP, Waku Memory — all opt-in |
+| [nrl-kg-integration.md](nrl-kg-integration.md) | the NIT wizard reading NRL's tender knowledge graph for precedent |
 | [nam/integration.md](nam/integration.md) | the NAM harness: the PR Creation Flow, its tools and gates, settings, identity and the case route |
+| [nam/harness-api.md](nam/harness-api.md) | plugging the NAM harness API into the Procurix.ai backend or any other client: run it, identity, every endpoint, errors |
 | [commands.md](commands.md) | every `waku` and `make` command |
 | [evals.md](evals.md) | the two kinds of eval, the release gate, traces and spend |
 | [roadmap.md](roadmap.md) | what is live, what is still a skeleton, upgrade paths |

@@ -559,9 +559,9 @@ def test_the_chat_remembers_its_case_every_turn(tmp_path, monkeypatch):
 
 
 def test_an_old_models_setting_does_not_stop_the_server(caplog):
-    chains = llm.parse_chains("route=a; followup=b; domain=c", "main", "small")
-    assert chains == {"domain": ("c",)}
-    assert "no task 'route'" in caplog.text
+    chains = llm.parse_chains("planner=a; followup=b; domain=c", "main", "small")
+    assert chains["domain"] == ("c",) and chains["followup"] == ("b",)
+    assert "planner" not in chains and "no task 'planner'" in caplog.text
 
 
 def test_the_number_beside_an_option_names_what_sap_counts():

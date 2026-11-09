@@ -68,6 +68,31 @@ MESSAGES = {
         "give me the final report of the finished work",
         "status update: what is done and what items are open",
     ],
+    "nrl-procurement": [
+        "which tender mode for goods worth 30 lakh, OTE or LTE",
+        "spot purchase threshold at NRL",
+        "how is an L1 tie resolved, and the MSE preference",
+        "which works contract type: item rate or lump sum",
+        "EPC contract LD cap and scope change",
+        "QCBS or LCS selection system for a consultancy",
+        "when is single source nomination of a consultant allowed",
+    ],
+    "nam-documents": [
+        "explain the PQC criteria for this tender",
+        "what turnover and experience should the pre-qualification criteria ask",
+        "extract the PQC clauses from this document",
+        "what does the SCC say about liquidated damages",
+        "explain the special conditions of contract",
+        "extract the SCC clauses: warranty and delivery period",
+        "check the technical specification of the gasket",
+        "which ASME standards and materials should the specification name",
+        "extract the BOQ line items with quantity and rate",
+        "explain the bill of quantities for this tender",
+        "draft the administrative approval note",
+        "what goes in an AAN approval note",
+        "OCR the scanned pages and keep units",
+        "what are the extraction rules for scanned tender pages",
+    ],
     "waku-memory": [
         "connect waku memory",
         "how do I share my memory with claude code",
@@ -106,43 +131,21 @@ def test_every_skill_named_here_still_exists():
 
 # A skill split into topics loads only the topics a message names
 # (loader.Skill.focus): a PQC question must not carry the BOQ and SCC parts.
-# No shipped skill has topics today, so the case brings its own.
-TOPIC_SKILL = """---
-name: tender-terms
-description: tender terms: pqc, scc, boq, pre-qualification criteria, special conditions, bill of quantities, liquidated damages, clauses of a tender document.
----
-
-Shared rules for every topic.
-
-## Rules
-terms: extract, extraction rules
-Keep units.
-
-## PQC
-terms: pqc, pre-qualification criteria
-What a bidder must show.
-
-## SCC
-terms: scc, special conditions of contract
-Terms specific to the contract.
-
-## BOQ
-terms: boq, bill of quantities
-The itemised list.
-"""
 TOPICS = {
     "explain the PQC criteria for this tender": ["PQC"],
     "what does the SCC say about liquidated damages": ["SCC"],
+    "check the technical specification of the gasket": ["Spec"],
     "explain the bill of quantities for this tender": ["BOQ"],
+    "what goes in an AAN approval note": ["AAN"],
     "extract the PQC clauses from this document": ["Rules", "PQC"],
+    "which tender mode for goods worth 30 lakh, OTE or LTE": ["Goods"],
+    "QCBS or LCS selection system for a consultancy": ["Services"],
 }
 
 
 @pytest.mark.parametrize("message", sorted(TOPICS))
-def test_a_topic_skill_loads_only_the_topics_named(message, tmp_path):
-    (tmp_path / "tender-terms").mkdir()
-    (tmp_path / "tender-terms" / "SKILL.md").write_text(TOPIC_SKILL, encoding="utf-8")
-    skill = SkillLoader([tmp_path]).match(message)[0]
+def test_a_topic_skill_loads_only_the_topics_named(message):
+    skill = LOADER.match(message)[0]
     loaded = [line[3:].split()[0] for line in skill.focus(message).splitlines()
               if line.startswith("## ")]
     assert loaded == TOPICS[message], (message, loaded)

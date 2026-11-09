@@ -292,9 +292,16 @@ def check_output(text: str, *, allowed_ids=(), tool_names=()) -> list[str]:
 
 
 def tool_names() -> tuple[str, ...]:
-    """The NAM tool names a model's words must not carry to a person."""
-    return ("nam_answer", "nam_ask", "nam_case", "nam_estimate", "nam_need", "nam_pick",
-            "nam_pr", "nam_search", "nam_tenders")
+    """Every tool, action and flow-internal name a model's words must not
+    carry to a person: the contracts, ocr_document, the irreversible actions
+    and gates of the stage machine."""
+    from waku.nam import orchestrator
+    from waku.nam.contracts.base import CONTRACTS
+
+    names = {*CONTRACTS, "ocr_document", *orchestrator.EFFECTS, "pending_action", "action_id",
+             "nam_answer", "nam_ask", "nam_case", "nam_choose", "nam_estimate", "nam_need",
+             "nam_pick", "nam_pr", "nam_search", "nam_tenders", "nam_undo"}
+    return tuple(sorted(n for n in names if "_" in n))
 
 
 def wrap_json(value, source: str, ident: str = "", cap: int = PROMPT_CAP) -> str:

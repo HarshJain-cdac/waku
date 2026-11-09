@@ -21,8 +21,9 @@ def main() -> None:
     problems: list[str] = []
     names: dict[str, Path] = {}
 
-    # the repo's skills, loaded by chat
-    files = sorted((REPO / "skills").rglob("SKILL.md"))
+    # the repo's skills and the NAM knowledge skills (waku/nam/skills/), both loaded by chat
+    files = sorted([*(REPO / "skills").rglob("SKILL.md"),
+                    *(REPO / "waku" / "nam" / "skills").rglob("SKILL.md")])
     if not files:
         problems.append("no SKILL.md files found under skills/")
 

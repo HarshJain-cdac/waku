@@ -6,6 +6,12 @@ works the manual's three stages with its own tools, and the harness keeps the
 case and checks every gate in code. The chat is the way in: `POST /api/chat`
 or `POST /api/chat/stream` on the dashboard server.
 
+The harness API is the other way in, for the Procurix.ai backend and any
+other client: `waku nam-api` (`/v1/nam/*`) and the dashboard's `/api/nam/*`
+routes run the stage machine through `waku.nam.run()`. It has its own guide,
+[harness-api.md](harness-api.md). Both ways read the same SAP records and the
+same identity headers.
+
 ## 1. Run it
 
 ```
@@ -21,6 +27,7 @@ Settings come from the environment:
 | `WAKU_KG_TOOLS` | every KG tool and the NAM tools | the KG tools the agent gets, comma separated. `sap_search` gives SAP's PR, PO and service lines alone; `sap_search,nam` adds the NAM tools, which then read SAP's records only. |
 | `WAKU_DOMAIN_ONLY` | on where `WAKU_KG_URL` is set | the chat answers only NRL procurement work (`waku/nam/domain.py`). `0` turns it off, `1` turns it on anywhere. |
 | `WAKU_NAM_MODELS` | the small model, then the main one | the models for the `domain` check, in the order tried: `domain=m1,m2`. |
+| `WAKU_NAM_CHAT` | `flow` | what NAM is in the chat: `flow`, the PR Creation Flow below; `driver`, the earlier need-capture driver that runs in code (`waku/nam/drive.py`), for clients built on it |
 | `WAKU_PROVIDER`, `WAKU_MODEL`, `WAKU_SMALL_MODEL` | the provider's defaults | the model provider and its two models |
 
 ## 2. The flow

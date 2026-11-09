@@ -238,7 +238,11 @@ understood: the materials a job description names, how many of each SAP
 holds (by short text and long text), the ones the officer takes forward, and
 for each of those, one at a time, the one material code, put in a cart. Then
 the PUR cases ranked by how many of the materials each holds, and one PR per
-cart item. The estimate is there when the officer asks. The flow is soft: the agent decides each next step in the chat, and
+cart item. The estimate is there when the officer asks. Beside it, the harness API (`waku.nam.run`, `waku nam-api` on /v1/nam/*,
+the dashboard's /api/nam/* routes; docs/nam/harness-api.md) runs the
+stage machine of flows and gates for the Procurix screens and any other
+client; `WAKU_NAM_CHAT=driver` puts its earlier need-capture driver back in
+the chat. The flow is soft: the agent decides each next step in the chat, and
 the harness keeps the case and checks every gate in code.
 
 - **The guide** (`flow.py`): the manual's steps and the chat's case, in the

@@ -36,6 +36,14 @@ class Waku:
         # the domain check's model (waku/nam/domain.py), built on first use,
         # and the last turn's system prompt, for the check's second reply
         self._nam_domain = None
+        # the earlier NAM chat driver (WAKU_NAM_CHAT=driver, waku/nam/drive.py):
+        # its follow-up writer and intent reader, built on first use, and the
+        # question each chat has open, kept in state.db (waku/nam/chatstate.py)
+        from waku.nam import chatstate as _nam_chatstate
+
+        self._nam_ask = None
+        self._nam_intent = None
+        self._nam_awaiting = _nam_chatstate.Awaiting(self.conn)
         self._last_system = ""
 
     def close(self) -> None:
@@ -120,6 +128,13 @@ class Waku:
                     # renders it identically — it simply arrives all at once.
                     notify("text", {"delta": reply_text})
                 result = LoopResult(reply=reply_text, tool_calls=[], iterations=0)
+
+            # THE EARLIER NAM DRIVER, when this chat is set to it
+            # (WAKU_NAM_CHAT=driver): a stated need or an answer to need
+            # capture's open question runs in code (waku/nam/drive.py). The
+            # default is the PR Creation Flow, which the agent works itself.
+            if result is None and self._nam_driver_on():
+                result = self._drive_nam(user_message, notify, stream)
 
             if result is None and self.settings.graph_workflows:
                 try:
@@ -216,6 +231,9 @@ class Waku:
 
     def _nam_reminder(self, result: LoopResult, notify, stream: bool) -> None:
         """Ask the case's open question again after a turn that asked nothing."""
+        if self._nam_driver_on():
+            self._nam_driver_reminder(result, notify, stream)
+            return
         if any(c.get("tool") in ("nam_ask", "nam_choose", "ask_options") for c in result.tool_calls) or \
                 "nam_ask" not in {t["name"] for t in self.tools.schemas()}:
             return
@@ -236,6 +254,117 @@ class Waku:
         if stream:
             notify("text", {"delta": extra})
         notify("ask_options", ask)
+
+    def _nam_driver_reminder(self, result: LoopResult, notify, stream: bool) -> None:
+        """The earlier driver's reminder: its open question (drive.reminder)."""
+        if not getattr(self.settings, "kg_url", "") or any(
+                c.get("tool") == "ask_options" for c in result.tool_calls):
+            return              # no harness, or the model asked something itself
+        from waku.nam import drive, sap_need
+
+        focus = getattr(self.session, "focus", None) or {}
+        try:
+            if sap_need.source(getattr(self.settings, "nam_source", None)) == "sap":
+                back = sap_need.reminder(self.conn, self.session.session_id)
+            else:
+                back = drive.reminder(self.conn, self.session.session_id,
+                                      str(focus.get("case_id") or ""), self._nam_awaiting)
+        except Exception:  # noqa: BLE001 - a reminder is a courtesy, the reply stands
+            return
+        if back is None:
+            return
+        text, ask = back
+        extra = (f"\n\nBack to the need: {text}" if ask.get("field") == "sap"
+                 else f"\n\nBack to the case: {text}")
+        result.reply = (result.reply or "") + extra
+        result.tool_calls = [*result.tool_calls, {
+            "tool": "ask_options", "args": ask,
+            "output": f"Asked the user again: \"{ask['question']}\". Waiting for the answer."}]
+        if stream:
+            notify("text", {"delta": extra})
+        notify("ask_options", ask)
+
+    def _drive_nam(self, user_message: str, notify, stream: bool) -> LoopResult | None:
+        """One NAM capture step run by the harness, or None for the model."""
+        if not getattr(self.settings, "kg_url", ""):
+            return None
+        from waku.nam import kg_tools, sap_need
+
+        sap = sap_need.source(getattr(self.settings, "nam_source", None)) == "sap"
+        only = kg_tools.allowed(getattr(self.settings, "kg_tools", ""))
+        if not sap and only is not None and "nam_capture_need" not in only:
+            return None             # the KG tools under test do not include NAM's
+        from waku.nam import drive
+        from waku.nam import llm as nam_llm
+
+        try:
+            client = getattr(self.memory, "client", None)
+            if self._nam_ask is None:
+                self._nam_ask = nam_llm.client_asker(client, self.settings, self.conn,
+                                                     "followup") or False
+            if sap:
+                # need capture on SAP's lines: the material, not the tender
+                out = sap_need.turn(self.conn, self.session.session_id,
+                                    self.settings.kg_url, user_message,
+                                    ask_model=self._nam_ask or None)
+                # a question of the officer's own mid-way: the agent answers
+                # it knowing which materials are still in
+                self.session.sap_open = (sap_need.context(self.conn, self.session.session_id)
+                                         if out is None else None)
+                return self._nam_out(out, notify, stream)
+            if self._nam_intent is None:
+                # what an in-flow message means, read with the case's context
+                self._nam_intent = nam_llm.client_asker(client, self.settings, self.conn,
+                                                        "intent") or False
+            focus = getattr(self.session, "focus", None) or {}
+            from waku.runtime.session import strip_tools_note
+
+            recent = [(m["role"], strip_tools_note(m.get("content") or ""))
+                      for m in self.session.history[-12:]]
+            out = drive.turn(self.conn, self.settings.home, self.settings.kg_url,
+                             self.session.session_id, user_message,
+                             ask_model=self._nam_ask or None, awaiting=self._nam_awaiting,
+                             case_id=str(focus.get("case_id") or ""),
+                             intent_ask=self._nam_intent or None, history=recent)
+        except Exception as exc:  # noqa: BLE001 - the driver must never break a turn
+            notify("nam_driver", {"error": repr(exc)})
+            return None
+        return self._nam_out(out, notify, stream)
+
+    def _nam_out(self, out: dict | None, notify, stream: bool) -> LoopResult | None:
+        """A harness step's result as the turn's, its tool calls and question shown."""
+        if out is None:
+            return None
+        # the diagram lights the NAM harness: this turn was the harness's
+        notify("nam", {"by": "driver", "step": out["tool_calls"][0]["tool"]
+                       if out["tool_calls"] else ""})
+        for call in out["tool_calls"]:
+            notify("tool_start", {"tool": call["tool"]})
+            notify("tool", call)
+        if out["ask"]:
+            notify("ask_options", out["ask"])
+        if stream:
+            notify("text", {"delta": out["reply"]})
+        return LoopResult(reply=out["reply"], tool_calls=out["tool_calls"], iterations=0)
+
+    def _case_focus(self) -> dict | None:
+        """The NAM case this conversation opened last, as Session.focus, or
+        None. Never breaks a turn: no case, or no NAM tables, is just None."""
+        if getattr(self.session, "focus", None):
+            return None
+        from waku.nam import drive, journey
+
+        try:
+            case_id = drive.session_case(self.conn, self.session.session_id)
+            return journey.focus(self.conn, case_id) if case_id else None
+        except Exception:  # noqa: BLE001 - context is a courtesy, the turn runs without it
+            return None
+
+    def _nam_driver_on(self) -> bool:
+        """True when this Waku's chat runs the earlier NAM driver
+        (WAKU_NAM_CHAT=driver) instead of the PR Creation Flow."""
+        return (getattr(self.settings, "nam_chat", "") == "driver"
+                and bool(getattr(self.settings, "kg_url", "")))
 
     def _nam_guide(self) -> str | None:
         """The PR Creation Flow and this chat's case, for the agent's
@@ -261,8 +390,17 @@ class Waku:
         flag-off default — loop-as-a-node can never drift from loop-as-default."""
         # the PR Creation Flow and this chat's case are in view every turn: the
         # chat's memory of where the need stands (waku/nam/flow.py)
-        self.session.nam_guide = self._nam_guide()
-        system = self.session.build_system(user_message, notify=notify)
+        self.session.nam_guide = None if self._nam_driver_on() else self._nam_guide()
+        # with the earlier driver, the harness case this chat opened is in view
+        # for the turn, unless a Procurix screen already named one
+        own = self._case_focus() if self._nam_driver_on() else None
+        if own:
+            self.session.focus = own
+        try:
+            system = self.session.build_system(user_message, notify=notify)
+        finally:
+            if own:
+                self.session.focus = None
         self._last_system = system
         # Working memory is a bounded window: only the last N turns (2 rows
         # each) enter the prompt, so context/cost/latency stay flat no matter

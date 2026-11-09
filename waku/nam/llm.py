@@ -3,22 +3,38 @@ attempt.
 
 THE TASKS
   A task is one place in the harness that asks a model something on its own,
-  outside the agent's turn. There is one:
+  outside the agent's turn. The model only ever picks or proposes; the
+  harness checks the answer:
 
     domain    after a turn that used no tool, whether the agent's reply
               answered a request that is not procurement work from general
               knowledge (domain.py): "ok" or "strayed", nothing else; a
               strayed reply goes back to the agent once. Small model.
 
-  Everything else in the PR Creation Flow is the agent's own turn, its tools
-  checked in code (stage_tools.py). A new call site adds its task to TASKS.
+  The harness API's flows (waku.nam.run, playbooks/) ask five more:
+
+    route     one flow id from a closed list, when the prompt is ambiguous
+              (router.py). Small model.
+    followup  the next narrowing question in need capture (followup.py).
+              Main model.
+    review    ambiguous or conflicting clauses in the drafts, on top of the
+              code's own checks (playbooks/review.py). Main model.
+    intent    what an officer's message means while a case is open
+              (understand.py): one meaning from a closed list. Small model.
+    quantity  a quantity and unit for the quantity sheet's lines that no past
+              tender gives (playbooks/quantity.py), marked as the AI's and
+              approved by the officer at the quantity gate. Main model.
+
+  The chat's PR Creation Flow is the agent's own turn, its tools checked in
+  code (stage_tools.py). A new call site adds its task to TASKS.
 
 THE CONFIGURATION
-  WAKU_NAM_MODELS="domain=model-a,model-b"
+  WAKU_NAM_MODELS="route=model-a,model-b; followup=model-c"
   Per task, the models to try in order: the first is used, the next only
   when the one before failed. A task left out gets the small model then the
-  main one. A name that is not a task is ignored with a warning (older
-  settings named tasks that no longer exist).
+  main one for a "small" task, the main then the small one for a "main"
+  task. A name that is not a task is ignored with a warning, so a setting
+  written for another version never stops the server.
 
 ONE CALL (complete)
   For each model of the task's chain: no reply in the task's time, or an
@@ -67,6 +83,16 @@ TASKS: dict[str, Task] = {t.name: t for t in (
     # checked after a turn with no tool; a slow or absent model keeps it
     Task("domain", "whether a reply strayed from procurement work", "small", 400, 10.0,
          "low"),
+    Task("route", "pick one flow id from a closed list", "small", 600, 20.0, "low"),
+    # 20s an attempt: a local model that has not answered by then rarely does,
+    # and the tenders' own question is there at once (followup.ASK_BUDGET_S)
+    Task("followup", "the next narrowing question in need capture", "main", 1500, 20.0, "low"),
+    Task("review", "ambiguous or conflicting clauses the code checks miss", "main", 2000,
+         60.0, "low"),
+    Task("quantity", "a quantity and unit for lines the tenders do not give", "main", 4000,
+         60.0, "low"),
+    Task("intent", "what the officer's message means in the open flow", "small", 600,
+         15.0, "low"),
 )}
 
 SHORTER = ("\n\nYour last reply was cut off at its length limit. Reply again, much "

@@ -48,7 +48,7 @@ def test_the_bundled_skills_are_findable():
     for d in dirs:
         assert d.is_dir()
     names = {s.name for s in SkillLoader(dirs).skills}
-    assert {"autonomous-work", "waku-memory"} == names, \
+    assert {"autonomous-work", "waku-memory", "nam-documents", "nrl-procurement"} == names, \
         sorted(names)
 
 

@@ -172,3 +172,23 @@ def test_a_tender_with_no_item_lists_its_line_items(monkeypatch):
     out = tool.fn(item="", tender="PUR‑INSTMNT‑1003188")
     assert out.startswith("TENDER ITEMS — PUR-INSTMNT-1003188 · ARC for gauges: 1 line item(s).")
     assert "| 1 | TG BiMet 0-200 DegC U320T50 | I-TG-G200-320-02 |" in out
+
+
+def test_a_tender_read_the_mcp_server_lacks_goes_to_the_kg_api(monkeypatch):
+    # the MCP server serves SAP's records alone: the harness API's tender
+    # reads go to the tender knowledge graph's own API instead
+    from waku.nam import kg_mcp, kg_tools, need
+
+    def no_tool(*a, **k):
+        raise RuntimeError("Unknown tool: search_tenders")
+
+    seen = []
+    monkeypatch.setattr(kg_mcp, "legacy_get", no_tool)
+    monkeypatch.setattr(kg_tools, "_get", lambda base, path, params: seen.append(
+        (base, path)) or {"tenders": []})
+    monkeypatch.setenv("WAKU_KG_API_URL", "http://kg-api:8077")
+    assert need._get("http://sap/mcp", "/api/kg/tenders", {"query": "valve"}) == {"tenders": []}
+    assert seen == [("http://kg-api:8077", "/api/kg/tenders")]
+    monkeypatch.setenv("WAKU_KG_API_URL", "mcp")            # no KG API: the error stands
+    with pytest.raises(RuntimeError, match="Unknown tool"):
+        need._get("http://sap/mcp", "/api/kg/tenders", {"query": "valve"})

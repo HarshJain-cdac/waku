@@ -169,6 +169,13 @@ class Session:
         # The PR Creation Flow and this chat's NAM case (waku/nam/flow.py),
         # set by Waku for each turn, or None where NAM is not set up.
         self.nam_guide: str | None = None
+        # The NAM case a Procurix screen has open while the officer chats beside
+        # it (dashboard.case_focus): {case_id, screen, title, stage, journey},
+        # or None. Set for one turn only, so a case never leaks into another chat.
+        self.focus: dict | None = None
+        # the SAP narrowing the earlier driver has open in this chat
+        # (WAKU_NAM_CHAT=driver, waku/nam/sap_need.py), set per turn
+        self.sap_open: str | None = None
 
     def build_system(self, user_message: str, notify=None) -> str:
         from datetime import datetime
@@ -208,6 +215,35 @@ class Session:
             # the manual's steps and where this chat's case stands: the chat's
             # memory of the need, read fresh from the case every turn
             parts.append(self.nam_guide)
+
+        sap_open = getattr(self, "sap_open", None)
+        if sap_open:
+            # the SAP narrowing this chat is in (waku/nam/sap_need.py)
+            parts.append(sap_open)
+
+        f = getattr(self, "focus", None)
+        if f:
+            # a harness case a Procurix screen has open beside the chat
+            where = (f"open on the Procurix '{f['screen']}' screen" if f.get("screen")
+                     else "open in this conversation")
+            parts.append(
+                f"\nThe officer has NAM case {f['case_id']} {where} ({f.get('title', '')}; "
+                f"stage {f.get('stage', '?')}). 'This', 'it' and 'the case' mean "
+                f"{f['case_id']}: pass it as need_id / case_id to the NAM tools, never "
+                f"another id.")
+            if f.get("journey"):
+                # the whole journey (waku/nam/journey.py): done, now, next
+                parts.append(f["journey"])
+            else:
+                if f.get("stage_name"):
+                    parts.append(f"Its stage now, from the NAM harness: {f['stage']} "
+                                 f"{f['stage_name']}.")
+                if f.get("needs"):
+                    parts.append("What this stage still needs: " + "; ".join(f["needs"]) + ".")
+                if f.get("pending"):
+                    parts.append(f"Waiting for approval: {f['pending']}.")
+            parts.append("Answer questions about where the case stands from these facts, "
+                         "not from an earlier step's tool output.")
 
         if self.memory is not None:
             # Hero moment #1: a cheap judge decides IF we retrieve at all —

@@ -95,9 +95,13 @@ def make_waku(home: Path, client=None, **settings_overrides):
     settings_overrides.setdefault("kg_url", "")
     # and so are the KG tools under test (WAKU_KG_TOOLS) and the KG's own API
     # (WAKU_KG_API_URL, "" reads the KG through kg_url): a test names them
-    for name in ("kg_tools", "kg_api_url"):
+    for name in ("kg_tools", "kg_api_url", "nam_source"):
         if name in known:
             settings_overrides.setdefault(name, "")
+    # and what NAM is in the chat (WAKU_NAM_CHAT): the PR Creation Flow,
+    # unless a test of the earlier driver names it
+    if "nam_chat" in known:
+        settings_overrides.setdefault("nam_chat", "flow")
     settings = Settings(home=home, **settings_overrides)
     if client is not None and not settings.api_key:
         settings.api_key = "offline"  # never read the real key for scripted runs

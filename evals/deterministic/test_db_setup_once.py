@@ -44,16 +44,13 @@ def test_reads_wait_for_a_write_instead_of_failing(tmp_path):
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == db.BUSY_TIMEOUT_MS
 
 
-def test_nam_case_setup_runs_once(tmp_path, monkeypatch):
-    from waku.nam import case
+def test_nam_store_setup_runs_once(tmp_path, monkeypatch):
+    from waku.nam import store
 
     calls = []
-    real = db.once
-
-    def once(conn, name, setup, table=None):
-        return real(conn, name, lambda c: (calls.append(name), setup(c)), table)
-    monkeypatch.setattr(db, "once", once)
+    real = store._setup
+    monkeypatch.setattr(store, "_setup", lambda conn: (calls.append(1), real(conn)))
     conn = db.connect(tmp_path)
     for _ in range(4):
-        case.ensure(conn)
-    assert [c for c in calls if c.startswith("nam.")] == ["nam.case"]
+        store.ensure(conn)
+    assert calls == [1]

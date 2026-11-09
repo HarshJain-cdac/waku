@@ -61,6 +61,16 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
             # that SAP does not show is the KG tools' (kg_tender_record)
             for t in stage_tools.make_tools(conn, settings.home, settings.kg_url):
                 registry.register(t)
+        if getattr(settings, "nam_chat", "") == "driver" and (
+                only is None or "nam_capture_need" in only):
+            # the earlier need capture (waku/nam/capture.py), for the chat
+            # driver's clients: a stated need -> its related past tenders
+            from waku.nam import capture as nam_capture
+            from waku.nam import llm as nam_llm
+
+            ask = nam_llm.client_asker(getattr(memory, "client", None), settings, conn,
+                                       "followup")
+            registry.register(nam_capture.make_tool(conn, settings.home, settings.kg_url, ask))
 
     # Memory self-management — the agent can correct/forget memory, learn rules,
     # and author its own skills (feels like a personal agent, not a black box).
