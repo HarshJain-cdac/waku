@@ -78,9 +78,26 @@ def make_waku(home: Path, client=None, **settings_overrides):
     # happened to `graph_workflows` here. Filtering keeps this list a superset
     # that costs nothing when an entry is absent.
     known = {f.name for f in dataclasses.fields(Settings)}
-    for switch in ("apple_calendar", "google_calendar", "apple_tools", "graph_workflows"):
+    #   fast_greetings         answer a pure greeting from the intent node with
+    #                          NO model call, so a scripted client's first
+    #                          response is never consumed — and, like the
+    #                          others, it defaults ON from the environment,
+    #                          which is exactly what this list is for
+    #   domain_only            answer only procurement work (waku/nam/domain.py):
+    #                          on wherever WAKU_KG_URL is set, and a message the
+    #                          word rules cannot decide costs one model call
+    for switch in ("apple_calendar", "google_calendar", "apple_tools", "graph_workflows",
+                   "fast_greetings", "domain_only"):
         if switch in known:
             settings_overrides.setdefault(switch, False)
+    # the KG is the machine's own (WAKU_KG_URL in .env): a test that wants one
+    # names it, so an offline eval never waits on a real server
+    settings_overrides.setdefault("kg_url", "")
+    # and so are the KG tools under test (WAKU_KG_TOOLS) and the KG's own API
+    # (WAKU_KG_API_URL, "" reads the KG through kg_url): a test names them
+    for name in ("kg_tools", "kg_api_url"):
+        if name in known:
+            settings_overrides.setdefault(name, "")
     settings = Settings(home=home, **settings_overrides)
     if client is not None and not settings.api_key:
         settings.api_key = "offline"  # never read the real key for scripted runs

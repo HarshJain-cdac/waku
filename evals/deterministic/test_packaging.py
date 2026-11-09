@@ -48,7 +48,8 @@ def test_the_bundled_skills_are_findable():
     for d in dirs:
         assert d.is_dir()
     names = {s.name for s in SkillLoader(dirs).skills}
-    assert {"schedule-meeting", "weekly-brief"} <= names, sorted(names)
+    assert {"autonomous-work", "waku-memory"} == names, \
+        sorted(names)
 
 
 def test_the_wheel_carries_the_skills_folder():

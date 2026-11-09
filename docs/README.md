@@ -29,11 +29,14 @@ into four groups.
 | file | what it answers |
 |---|---|
 | [architecture.md](architecture.md) | the four pillars, and which file is which diagram box |
+| [../knowledge.md](../knowledge.md) | this deployment end to end: every block, its code, ports, the NAM harness and the KG, two requests traced through |
 | [loop-vs-graph.md](loop-vs-graph.md) | when a turn needs shape, and why the loop never changes |
 | [agent-graphs-design.md](agent-graphs-design.md) | the graph engine's design and its fail-open rule |
+| [memory-design.md](memory-design.md) | deciding which memory layer each piece of information belongs in, with the research behind it |
 | [memory-backends-playbook.md](memory-backends-playbook.md) | seeing your memories in each provider's own console |
 | [benchmarks.md](benchmarks.md) | what has been measured, and how |
 | [integrations.md](integrations.md) | voice, Telegram, Apple, Google Calendar, MCP, Waku Memory — all opt-in |
+| [nam/integration.md](nam/integration.md) | the NAM harness: the PR Creation Flow, its tools and gates, settings, identity and the case route |
 | [commands.md](commands.md) | every `waku` and `make` command |
 | [evals.md](evals.md) | the two kinds of eval, the release gate, traces and spend |
 | [roadmap.md](roadmap.md) | what is live, what is still a skeleton, upgrade paths |

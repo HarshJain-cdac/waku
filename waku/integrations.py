@@ -155,12 +155,12 @@ def _darwin_tools(env: Mapping[str, str]) -> bool:
 
 
 INTEGRATIONS: tuple[Integration, ...] = (
-    Integration("telegram", "Channels", "Telegram", "Lets Waku receive and send Telegram messages.",
+    Integration("telegram", "Channels", "Telegram", "Lets the agent receive and send Telegram messages.",
                 (EnvField("TELEGRAM_BOT_TOKEN", "Bot token", required=True, secret=True),
                  EnvField("TELEGRAM_ALLOWED_USER", "Allowed user")), "telegram", "telegram",
                 "https://t.me/BotFather", ReloadMode.GATEWAY,
                 lambda env: bool(env.get("TELEGRAM_BOT_TOKEN")), None),
-    Integration("discord", "Channels", "Discord", "Lets Waku answer in a Discord server.",
+    Integration("discord", "Channels", "Discord", "Lets the agent answer in a Discord server.",
                 (EnvField("DISCORD_BOT_TOKEN", "Bot token", required=True, secret=True),
                  EnvField("DISCORD_ALLOWED_USER", "Allowed user"),
                  EnvField("DISCORD_ALLOWED_CHANNEL", "Allowed channel"),
@@ -169,7 +169,7 @@ INTEGRATIONS: tuple[Integration, ...] = (
                  EnvField("DISCORD_HOME", "Workspace directory")), "discord", "discord", "",
                 ReloadMode.GATEWAY, lambda env: bool(env.get("DISCORD_BOT_TOKEN")), None,
                 _positive_int),
-    Integration("whatsapp", "Channels", "WhatsApp", "Lets Waku answer WhatsApp messages via the Meta Cloud API.",
+    Integration("whatsapp", "Channels", "WhatsApp", "Lets the agent answer WhatsApp messages via the Meta Cloud API.",
                 (EnvField("WHATSAPP_TOKEN", "Access token", required=True, secret=True),
                  EnvField("WHATSAPP_PHONE_NUMBER_ID", "Phone number ID", required=True),
                  EnvField("WHATSAPP_APP_SECRET", "App secret", required=True, secret=True),
@@ -179,18 +179,18 @@ INTEGRATIONS: tuple[Integration, ...] = (
                 "whatsapp", "httpx", "https://developers.facebook.com/apps",
                 ReloadMode.GATEWAY, lambda env: bool(env.get("WHATSAPP_TOKEN")), None),
     Integration("google_calendar", "Calendar & Productivity", "Google Calendar",
-                "Lets Waku create and update Google Calendar events.",
+                "Lets the agent create and update Google Calendar events.",
                 (EnvField("WAKU_GOOGLE_CALENDAR", "Enable Google Calendar", FieldKind.BOOL),
                  EnvField("WAKU_GOOGLE_CALENDAR_ID", "Calendar ID", default="primary")),
                 "gcal", "googleapiclient", "https://developers.google.com/calendar/api/quickstart/python",
                 ReloadMode.AGENT, lambda env: bool(env.get("WAKU_GOOGLE_CALENDAR")), None),
     Integration("apple_calendar", "Calendar & Productivity", "Apple Calendar",
-                "Lets Waku work with Apple Calendar on this Mac.",
+                "Lets the agent work with Apple Calendar on this Mac.",
                 (EnvField("WAKU_APPLE_CALENDAR", "Enable Apple Calendar", FieldKind.BOOL),
                  EnvField("WAKU_APPLE_CALENDARS", "Calendars")), None, None, "", ReloadMode.AGENT,
                 _darwin, None),
     Integration("apple_tools", "Calendar & Productivity", "Apple Tools",
-                "Lets Waku use Apple Mail and other local Apple tools.",
+                "Lets the agent use Apple Mail and other local Apple tools.",
                 (EnvField("WAKU_APPLE_TOOLS", "Enable Apple tools", FieldKind.BOOL),), None, None,
                 "", ReloadMode.AGENT, _darwin_tools, None),
     Integration("notion", "Memory & Storage", "Notion", "Stores episodic memory in a Notion database.",
@@ -222,7 +222,7 @@ INTEGRATIONS: tuple[Integration, ...] = (
                  EnvField("ZEP_MAX_WAIT_SECONDS", "Max wait (s)",
                           help="Ingestion is asynchronous: graph.add returns in ~0.2s with the episode "
                                "unprocessed, and the text is not searchable until Zep has turned it into "
-                               "nodes and edges. Waku polls until it has, up to this long. Default 120 — "
+                               "nodes and edges. The agent polls until it has, up to this long. Default 120 — "
                                "raise it if seeding times out, never lower it to make a benchmark finish.")),
                 "arena", "zep_cloud", "", ReloadMode.AGENT,
                 lambda env: env.get("WAKU_SEMANTIC_STORE") == "zep", None),
@@ -247,7 +247,7 @@ INTEGRATIONS: tuple[Integration, ...] = (
                           help="Embeddings also require OPENAI_API_KEY (optionally OPENAI_EMBED_MODEL).")),
                 "supabase", "supabase", "", ReloadMode.AGENT,
                 lambda env: env.get("WAKU_SEMANTIC_STORE") == "supabase", None),
-    Integration("tavily", "Search & Observability", "Tavily", "Lets Waku search the web.",
+    Integration("tavily", "Search & Observability", "Tavily", "Lets the agent search the web.",
                 (EnvField("TAVILY_API_KEY", "API key", secret=True),), None, None,
                 "https://tavily.com", ReloadMode.LIVE, lambda env: bool(env.get("TAVILY_API_KEY")), None),
     Integration("otel", "Search & Observability", "OpenTelemetry", "Exports traces to an OTLP collector.",

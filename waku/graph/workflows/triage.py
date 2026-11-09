@@ -40,7 +40,7 @@ full  — anything mentioning tasks, schedules, people, notes, memory, or that
 User message: {message}"""
 
 QUICK_REPLY_PROMPT = """\
-You are Waku, a warm, concise personal assistant. The user's message needs no
+You are a warm, concise assistant with no product name. The user's message needs no
 tools or memory — reply in one or two short, natural sentences. If today's
 calendar (below) is clearly relevant, you may mention it; otherwise ignore it.
 

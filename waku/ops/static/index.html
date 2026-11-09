@@ -2,15 +2,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- Apply the stored theme before anything paints (see js/theme.js). -->
 <script>try{var t=localStorage.getItem("waku-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
-<title>Waku わく</title>
-<link rel="icon" type="image/svg+xml" href="/static/waku-mark.svg">
+<title>Procurement assistant</title>
 <link rel="stylesheet" href="/static/design/fonts.css">
 <link rel="stylesheet" href="/static/design/tokens.css">
 <link rel="stylesheet" href="/static/design/type.css">
 <link rel="stylesheet" href="/static/design/controls.css">
+<link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/style.css"></head><body>
 <nav id="nav" class="rail">
-  <div class="r-top"><i class="mark" aria-hidden="true"></i><span class="r-name">WAKU</span>
+  <div class="r-top">
     <button id="nav-collapse" class="r-chev" aria-label="Collapse the sidebar" aria-expanded="true">&#8249;</button></div>
   <div class="r-grp">System</div>
   <a href="#overview" data-v="overview" data-short="O" aria-label="Overview"><span class="lbl">Overview</span></a>
@@ -37,7 +37,6 @@
   <a href="#connections" data-v="connections" data-short="C" aria-label="Connections"><span class="lbl">Connections</span></a>
   <a href="#settings" data-v="settings" data-short="B" aria-label="Behaviour"><span class="lbl">Behaviour</span></a>
   <div class="r-bottom">
-    <a class="r-gh" href="https://github.com/ShenSeanChen/waku-agent" target="_blank" rel="noopener noreferrer">GitHub</a>
     <button id="theme-toggle" onclick="cycleTheme()"></button>
   </div>
 </nav>
@@ -49,6 +48,17 @@
   <div id="view"></div>
 </main>
 <div class="resizer" id="dock-resizer" title="Drag to resize chat"></div>
+<!-- The generated NIT beside the chat, 65:35 (render.js openNit). -->
+<section id="nitpane" aria-label="Generated NIT">
+  <div class="dockhead">
+    <span class="dt" id="nit-title">NIT</span>
+    <span class="arch-status nit-status" id="nit-status"></span>
+    <button class="btn btn-tertiary btn-sm" onclick="downloadNit(null, true)" title="Download now, marked DRAFT, with the gaps printed">Download draft</button>
+    <button class="btn btn-primary btn-sm" id="nit-download" onclick="downloadNit()" disabled title="Active once every entry is filled">Download PDF</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeNit()" title="Close the NIT">Close</button>
+  </div>
+  <div class="nit-scroll" id="nit-sheet"></div>
+</section>
 <aside id="dock">
   <div class="dockhead">
     <span class="dt">Chat</span>
@@ -63,7 +73,7 @@
   </div>
   <div class="chatlog" id="docklog"></div>
   <div class="chatbar">
-    <input id="dmsg" placeholder="Message Waku&hellip;" autocomplete="off">
+    <input id="dmsg" placeholder="Message&hellip;" autocomplete="off">
     <button id="mic" class="btn btn-secondary" title="Click to talk — local Whisper, no cloud"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button id="dsend" class="btn btn-primary">Send</button>
   </div>

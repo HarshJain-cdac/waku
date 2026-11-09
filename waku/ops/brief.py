@@ -4,8 +4,9 @@ mail, and memory into a focus-first summary. Cron it for a daily greeting:
 
     30 7 * * *  cd ~/waku-agent && make brief
 
-The heavy lifting lives in skills/weekly-brief/SKILL.md — this just kicks off
-the turn and saves the result to the outbox.
+The prompt below carries the whole request (the weekly-brief skill was removed
+when the bundled skills were narrowed to procurement work); this kicks off the
+turn and saves the result to the outbox.
 """
 
 from __future__ import annotations

@@ -104,6 +104,14 @@ friendly view; the **Data** tab shows the raw `state.db` tables.
   `apple.py`, `notes.py`, `messages.py`, `search.py`, `github.py`,
   `workspace.py`, `memory_admin.py`, the MCP client and `experimental.py`.
   `registry.py` decides which are on.
+- `waku/nam/` — the Need Assessment Module: NRL's PR Creation Flow for
+  goods. The manual's steps as the agent's guide (`flow.py`), one tool per
+  step with its gate in code (`stage_tools.py`, `narrow.py`, `estimate.py`,
+  `pr.py`), the case per chat with every version kept (`case.py`), the
+  trusted identity context and its permissions (`identity.py`,
+  `permissions.py`), the untrusted-text guard (`guard.py`), the hash-chained
+  audit log (`audit.py`) and the KG over MCP (`kg_mcp.py`, `kg_tools.py`).
+  See [docs/nam/integration.md](nam/integration.md).
 - `waku/memory/` — semantic (FTS5), episodic and procedural (SKILL.md) memory,
   plus `retrieval_gate.py` (hero 1: does this turn need memory?) and
   `consolidation.py` (every N exchanges).

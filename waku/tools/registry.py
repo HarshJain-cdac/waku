@@ -44,12 +44,22 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [t.to_api() for t in self._tools.values()]
 
+    def _unknown(self, name: str) -> str:
+        """A model that calls a skill (e.g. 'procurement/nit-generation') or a
+        made-up name gets told what it can call, so it retries with a real
+        tool on the next step instead of losing the thread."""
+        hint = ""
+        if "/" in name or "skill" in name.lower():
+            hint = " Skills are not tools: their guidance is already in your instructions."
+        return (f"Error: unknown tool '{name}'.{hint} "
+                f"Tools you can call: {', '.join(sorted(self._tools))}.")
+
     def execute(self, name: str, args: dict[str, Any], notify=None) -> str:
         """Run one tool call safely: the model observes errors as text instead
         of crashing the loop (execute_tool_safely pattern)."""
         tool = self._tools.get(name)
         if tool is None:
-            return f"Error: unknown tool '{name}'"
+            return self._unknown(name)
         try:
             if tool.wants_notify:
                 return tool.fn(**args, _notify=notify or (lambda kind, ev: None))

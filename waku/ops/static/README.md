@@ -9,6 +9,8 @@ files to change the UI; edit `dashboard.py` to change the server/API.
 - `style.css` — one flat file of rules; every value comes from the tokens in
   `design/` (see "Design system" below).
 - `design/`, `fonts/` — the Waku Memory design system and its three fonts.
+- `theme.css` — this deployment's colours (white and dark themes), as tokens
+  over `design/tokens.css`; see docs/context/design-system.md.
 - `js/` — the app, split by concern (below).
 
 ## The files (`js/`), in load order
@@ -23,7 +25,7 @@ runs the bootstrap and must load last**.
 | `theme.js`   | the system / light / dark toggle (`cycleTheme`), stored as `waku-theme` like the Memory console |
 | `memory.js`  | inline Memory / SOUL / skill editing actions |
 | `models.js`  | `applyModel` (the one `/api/settings` writer), model picker / catalog / pins |
-| `render.js`  | formatters + chat card renderers (`stagesRow`/`teleFooter`) + chatlog + streaming + `sendChat` |
+| `render.js`  | formatters + chat card renderers (`stagesRow`/`teleFooter`) + chatlog + streaming + `sendChat` + the generated NIT as the filled template beside the chat (`openNit`/`renderNit`/`closeNit`, `#nitpane`, NIT 65 : chat 35) |
 | `diagram.js` | `archSVG` (the architecture chart) **and** its live animation (`STAGE`/`hot`/`pollEvents`) |
 | `graph.js`   | graph workflows: data-driven topology chart (`graphSVG` from `d.graph.workflows`), the Overview panel (`graphPanel`), and `animateGraphStage` for `graph_*`/`route` events |
 | `views.js`   | subtab/db helpers, SQL console, Memory/Tools sub-views, the `VIEWS` router object |
@@ -44,7 +46,10 @@ Data flows one way: `refresh()` (main.js) fetches `/api/data` into the global
 - **`archSVG` is byte-frozen — do not rewrite the architecture chart.** It emits
   `data-node="…"`/`data-edge="…"` ids that the `STAGE` map (same file) drives the
   live animation from. If you ever change a node/edge id, change it in both
-  places. (Both are in `diagram.js` precisely so they stay together.)
+  places. (Both are in `diagram.js` precisely so they stay together.) The chart
+  draws the blocks `knowledge.md` (repo root) describes; a block added to the
+  code gets a box here and a row in that file's diagram table, and
+  `test_diagram_stages.py` checks the ids.
 - **The graph chart is data-driven — never hand-edit a topology.** `graphSVG`
   renders `Graph.describe()` served in `/api/data`, so the picture is provably
   what the engine runs (`test_graph_topology_payload.py` pins it). To change the

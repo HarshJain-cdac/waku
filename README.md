@@ -127,3 +127,9 @@ never build the same thing.
 Code is MIT — see [LICENSE](LICENSE). The Waku name, mark and design system belong to
 AutoManus Technologies, Inc. and are not MIT — see [LICENSE-BRAND](LICENSE-BRAND). Built by [@ShenSeanChen](https://github.com/ShenSeanChen)
 ([YouTube](https://www.youtube.com/@SeanAIStories) · [X](https://x.com/ShenSeanChen)).
+
+ .\.venv\Scripts\Activate.ps1
+$env:WAKU_PROVIDER="openai"
+$env:WAKU_BASE_URL="http://10.180.52.60:49689/v1"
+$env:WAKU_MODEL="Ministral-3-14B-Instruct-2512-Q5_K_S.gguf"
+$env:WAKU_API_KEY="token-abc123"

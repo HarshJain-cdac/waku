@@ -1,0 +1,53 @@
+{
+  "status": "DRAFT for review: who may do each act of the PR Creation Flow in NAM; correct it before production use",
+  "roles": {
+    "U1": "Officer (user / indenting officer)",
+    "U2": "User department",
+    "U3": "Authorized user",
+    "U4": "Drafter",
+    "U5": "Functional reviewers",
+    "U6": "Commercial Officer / Commercial Department",
+    "U7": "Approver(s) in Aarohan"
+  },
+  "aliases": {
+    "officer": "U1",
+    "user_department": "U2",
+    "authorized_user": "U3",
+    "drafter": "U4",
+    "functional_reviewer": "U5",
+    "commercial": "U6",
+    "approver": "U7"
+  },
+  "actions": {
+    "need": [
+      "U1",
+      "U2",
+      "U3"
+    ],
+    "estimate.build": [
+      "U1",
+      "U3"
+    ],
+    "estimate.lock": [
+      "U1",
+      "U3"
+    ],
+    "pr.fill": [
+      "U1",
+      "U3"
+    ],
+    "pr.confirm": [
+      "U1",
+      "U3"
+    ],
+    "case.read": [
+      "U1",
+      "U2",
+      "U3",
+      "U4",
+      "U5",
+      "U6",
+      "U7"
+    ]
+  }
+}

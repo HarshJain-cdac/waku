@@ -33,9 +33,10 @@ Two honest caveats, so nobody catches you out:
 > **A skill is a procedure written in English that the model *may* follow.
 > A graph is the same procedure written in code that it *cannot not* follow.**
 
-This repo has both. `skills/weekly-brief/SKILL.md` describes the morning routine
-step by step, and the loop reads it and mostly complies — but on a bad day it
-skips a step, reorders, or forgets a source. The graph version can't skip a node.
+This repo has both. `skills/autonomous-work/SKILL.md` describes how to work a
+multi-step task (plan, execute, verify each step), and the loop reads it and
+mostly complies — but on a bad day it skips a step or a check. The NAM harness's
+to-do list (`case.plan`) is the same procedure in code, and it can't skip one.
 
 That gives you a rule for "should I build a graph?"
 

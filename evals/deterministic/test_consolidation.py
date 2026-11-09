@@ -49,10 +49,18 @@ def memory(tmp_path):
     )
 
 
+# What the user said in the seeded chat: a fact is kept only when its words
+# are the user's own (consolidation._from_user), so the facts the scripted
+# summarizer returns have to come from here.
+SAID = ("Alex prefers morning meetings, the Acme demo is on Friday, "
+        "and Raj plays tennis.")
+
+
 def add_exchanges(conn, n: int) -> None:
     """n exchanges = 2n rows. The threshold counts EXCHANGES, not messages."""
     for i in range(n):
-        conn.execute("INSERT INTO chat_log (role, content) VALUES ('user', ?)", (f"msg {i}",))
+        conn.execute("INSERT INTO chat_log (role, content) VALUES ('user', ?)",
+                     (f"msg {i}: {SAID}",))
         conn.execute("INSERT INTO chat_log (role, content) VALUES ('assistant', ?)", (f"reply {i}",))
     conn.commit()
 

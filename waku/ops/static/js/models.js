@@ -34,7 +34,7 @@ async function loadModelList(){
   if (modelCatalog.listed){
     const free = ms.filter(m=>m.free), freeTools = free.filter(m=>m.tools);
     msg.textContent = `${ms.length} models on ${modelCatalog.endpoint}` +
-      (free.length ? ` · ${free.length} free, ${freeTools.length} of those tool-capable (Waku needs tool calling)` : "") +
+      (free.length ? ` · ${free.length} free, ${freeTools.length} of those tool-capable (the agent needs tool calling)` : "") +
       ` · type in the field above to search`;
   } else {
     msg.textContent = modelCatalog.error ? `model list unavailable: ${modelCatalog.error}` : "";

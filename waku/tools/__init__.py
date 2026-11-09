@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlite3
 
 from waku.config import Settings
-from waku.tools import calendar, memory_admin, messages, notes, search
+from waku.tools import calendar, clarify, memory_admin, messages, notes, search
 from waku.tools.registry import ToolRegistry
 
 
@@ -31,6 +31,36 @@ def build_registry(conn: sqlite3.Connection, settings: Settings, memory=None) ->
     # Web search — pairs with create_event for the multi-tool loop demo
     # ("find the World Cup games left and add them to my calendar").
     registry.register(search.make_tool())
+    # Clarify-before-acting: ask a fixed-choice question instead of guessing,
+    # before an underspecified create/generate call.
+    registry.register(clarify.make_tool())
+
+    # NRL tender knowledge-graph precedent (read-only, over HTTP to the KG's
+    # precedent_api service). Registered only when WAKU_KG_URL points somewhere:
+    # a tool the model can see but never reach is worse than no tool, because it
+    # will try, fail, and narrate the failure to the user mid-wizard.
+    #
+    # Reference material the model can be shown while deciding — read-only,
+    # and deliberately not wired into any drafting flow. See
+    # waku/nam/kg_tools.py.
+    if getattr(settings, "kg_url", ""):
+        from waku.nam import kg_tools as kg_precedent
+
+        only = kg_precedent.allowed(getattr(settings, "kg_tools", ""))
+        kg_api = kg_precedent.kg_api(getattr(settings, "kg_api_url", ""), settings.kg_url)
+        for t in kg_precedent.make_tools(settings.kg_url, only, kg_api):
+            registry.register(t)
+
+        # NAM, the PR Creation Flow (waku/nam/flow.py): one tool per step, each
+        # gate in code (waku/nam/stage_tools.py). A test of some KG tools alone
+        # (WAKU_KG_TOOLS) leaves them out unless it names "nam".
+        if only is None or "nam" in only:
+            from waku.nam import stage_tools
+
+            # the flow counts and narrows SAP's records; a PUR case's own data
+            # that SAP does not show is the KG tools' (kg_tender_record)
+            for t in stage_tools.make_tools(conn, settings.home, settings.kg_url):
+                registry.register(t)
 
     # Memory self-management — the agent can correct/forget memory, learn rules,
     # and author its own skills (feels like a personal agent, not a black box).

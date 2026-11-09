@@ -20,6 +20,7 @@ Bound to 127.0.0.1 only. For deep trace waterfalls use Phoenix (`make trace`).
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import shutil
@@ -54,34 +55,60 @@ from waku.ops.pricing import price_for, usage_summary
 from waku.ops.settings_api import apply_settings, pin_action, settings_info
 from waku.ops.tracing import TraceEncodingError, iter_trace_lines
 
+
 PORT = 7777
 # The frontend lives in its own files (static/index.html + style.css + app.js),
 # served as-is by this stdlib server — no build step, no framework. Edit those
 # to change the UI; edit this file to change the server/API.
 STATIC = Path(__file__).resolve().parent / "static"
+# Server itself still only BINDS to 127.0.0.1 (see main()) — this is separate:
+# it's the browser-side CORS check, needed because the Lovable frontend runs
+# on its own origin (e.g. https://your-app.lovable.app) and calls this API
+# cross-origin. Default "*" is fine for local dev; pin it to your deployed
+# frontend's origin (WAKU_CORS_ORIGIN=https://your-app.lovable.app) once
+# you're not just testing against localhost.
+CORS_ORIGIN = os.getenv("WAKU_CORS_ORIGIN", "*")
+# Optional bearer-token gate for /api/*. Uses its OWN env var — WAKU_API_KEY
+# is already taken (config.py's Settings.api_key, the LLM PROVIDER credential)
+# and must never be reused here, or every request would need the provider
+# key as a bearer token just to reach /api/chat.
+# Unset (default) = auth disabled, same as today.
+#   WAKU_DASHBOARD_KEY=$(python -c "import secrets; print(secrets.token_hex(32))") waku dashboard
+API_KEY = os.getenv("WAKU_DASHBOARD_KEY", "")
 
 
-def chat(message: str) -> dict:
+
+
+
+
+
+def chat(message: str, session_id: str | None = None, actor=None) -> dict:
     """One turn, one JSON result — the non-streaming door to the same room.
 
-    The dashboard itself uses /api/chat/stream; this exists for scripts and for
-    `curl`. It deliberately does NOT reimplement the turn: it drives chat_stream
-    and keeps the final "done" payload, because the two used to be separate
-    copies of the same 25 lines and had already drifted (the streaming one
-    reported which model answered, this one didn't). One implementation means
-    they cannot disagree again.
+    The dashboard itself uses /api/chat/stream; this exists for scripts, for
+    `curl`, and for the Lovable frontend's plain POST /api/chat. It deliberately
+    does NOT reimplement the turn: it drives chat_stream and keeps the final
+    "done" payload, because the two used to be separate copies of the same 25
+    lines and had already drifted (the streaming one reported which model
+    answered, this one didn't). One implementation means they cannot disagree
+    again.
     """
     final: dict = {}
 
     def collect_done(kind: str, ev: dict) -> None:
-        if kind == "done":
+        if kind in ("ask_options", "ask_field", "flow_complete", "nit"):
+            # Any of these is a first-class part of the result, not just a
+            # mid-turn event — a plain POST /api/chat caller (no SSE) would
+            # otherwise never see it, only the tool's placeholder text.
+            final[kind] = ev
+        elif kind == "done":
             final.update(ev)
 
-    chat_stream(message, collect_done)
+    chat_stream(message, collect_done, session_id=session_id, actor=actor)
     return final
 
 
-def chat_stream(message: str, emit) -> None:
+def chat_stream(message: str, emit, session_id: str | None = None, actor=None) -> None:
     """Run one turn, calling emit(kind, event) for every harness event AS it
     happens — gate decision, tool calls, and the reply text token by token —
     so the browser can show thinking stream in (like the CLI/voice do). Ends
@@ -89,11 +116,24 @@ def chat_stream(message: str, emit) -> None:
 
     A leading slash calls a graph workflow BY NAME instead of running a turn.
     Both doors end in the same 'done' event, so the chat renders the answer the
-    same way whether the harness routed it or you named the shape yourself."""
+    same way whether the harness routed it or you named the shape yourself.
+
+    `session_id`, when given, selects which thread this turn is appended to —
+    the SAME mechanism the dashboard's own "switch conversation" control uses
+    (Session.switch), just driven by an external caller (e.g. one browser tab
+    per Lovable end-user) instead of a click. Unknown ids are fine: switch()
+    already tolerates a session with no history yet, so the first message from
+    a brand-new session_id just starts that thread. Omit it to keep today's
+    behavior (the dashboard's own rotation decides).
+
+    `actor` is the trusted identity context the request carried
+    (waku/nam/identity.py, the X-NAM-* headers); None is this machine's own
+    officer."""
     command = commands.parse(message)
     if command is not None:
         _run_command(command, emit)
         return
+
 
     events: list[dict] = []
 
@@ -104,9 +144,14 @@ def chat_stream(message: str, emit) -> None:
 
     with agent_lock:
         agent = get_agent()
-        maybe_rotate_session(agent)
+        if session_id:
+            if agent.session.session_id != session_id:
+                agent.session.switch(session_id)  # existing Session API, no new state machine
+        else:
+            maybe_rotate_session(agent)
         start = datetime.now(UTC)
-        result = agent.respond(message, observer=observer, source="dashboard", stream=True)
+        result = agent.respond(message, observer=observer, source="api", stream=True,
+                               actor=actor)
         latency_ms = int((datetime.now(UTC) - start).total_seconds() * 1000)
 
     gate = next((e for e in events if e["kind"] == "gate"), None)
@@ -115,6 +160,7 @@ def chat_stream(message: str, emit) -> None:
     triage = next((e for e in events if e["kind"] == "triage"), None)
     quick = bool(route) and route.get("target") == "quick_reply"
     emit("done", {
+        "session_id": agent.session.session_id,
         "reply": result.reply,
         "gate": {"decision": gate["decision"], "reason": gate.get("reason")} if gate else None,
         "graph": ({"workflow": route.get("workflow", "triage"),
@@ -181,17 +227,6 @@ def _run_command(command: tuple[str, str], emit) -> None:
     """
     name, arg = command
     start = datetime.now(UTC)
-    if name == "connect":
-        # Signing in opens YOUR browser and waits for you to click Allow. The
-        # dashboard runs on your machine, so it does that in-process: no shell,
-        # no terminal. ThreadingHTTPServer keeps the wait to this one request.
-        from waku.config import load_settings
-        from waku.connect import connect as connect_integration
-        from waku.connect import usage as connect_usage
-
-        reply = connect_integration(arg, load_settings().home) if arg else connect_usage()
-        emit("done", {"reply": reply, "tools": [], "iterations": 0, "latency_ms": 0, "gate": None})
-        return
     if name in ("graphs", "help", "?"):
         emit("done", {"reply": commands.describe(), "tools": [], "iterations": 0,
                       "latency_ms": 0, "gate": None})
@@ -269,6 +304,40 @@ def _get_notion_store():
 
         _notion_store = NotionEpisodeStore()
     return _notion_store
+
+
+_KG_HEALTH_CACHE: dict = {"at": 0.0, "value": None}
+
+
+def kg_health(settings) -> dict | None:
+    """Is the knowledge graph reachable, and how big is it?
+
+    Feeds the harness diagram's KG block. Cached for 30s and given a short
+    timeout on purpose: this runs on every dashboard refresh, and the KG lives
+    on another machine — a slow or dead KG must never be what makes the
+    dashboard feel slow. None means "not configured"; ok:false means
+    "configured but not answering", and the diagram says so rather than
+    drawing a healthy box.
+    """
+    if not getattr(settings, "kg_url", ""):
+        return None
+    from waku.nam import kg_tools
+
+    url = kg_tools.kg_api(getattr(settings, "kg_api_url", ""), settings.kg_url)
+    if kg_tools.is_mcp(url):
+        url = url.rstrip("/")[:-len("/mcp")] + "/v1"     # the MCP server's own health
+    now = time.time()
+    if _KG_HEALTH_CACHE["value"] is not None and now - _KG_HEALTH_CACHE["at"] < 30:
+        return _KG_HEALTH_CACHE["value"]
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/health", timeout=2) as resp:
+            value = json.loads(resp.read())
+    except Exception:  # noqa: BLE001 - an unreachable KG is a state, not an error
+        value = {"ok": False}
+    _KG_HEALTH_CACHE.update(at=now, value=value)
+    return value
 
 
 def collect() -> dict:
@@ -476,6 +545,8 @@ def collect() -> dict:
                                    or e.get("reply") or "")}
                        for e in events[-18:]][::-1],
         "trace_file": (trace_files[-1].name if trace_files else None),
+        # The KG block in the harness diagram reads this.
+        "kg": kg_health(settings),
         "trace_errors": trace_errors,
         "facts": rows("SELECT id, subject, content, source, created_at FROM facts ORDER BY id DESC"),
         "episodes": episodes_data["items"],
@@ -483,7 +554,7 @@ def collect() -> dict:
         "episodes_error": episodes_data["error"],
         "soul": (home / "SOUL.md").read_text(encoding="utf-8") if (home / "SOUL.md").exists() else "",
         "chat_pending": conn.execute("SELECT COUNT(*) FROM chat_log WHERE consolidated=0").fetchone()[0],
-        "chat_log": rows("SELECT role, content, consolidated, source, session_id, created_at FROM chat_log ORDER BY id DESC LIMIT 80")[::-1],
+        "chat_log": _shown_log(rows("SELECT role, content, consolidated, source, session_id, created_at FROM chat_log ORDER BY id DESC LIMIT 80")[::-1]),
         "sessions": session_list(conn),
         "current_session": (live.session.session_id if live is not None else dash_session()),
         "consolidate_every": settings.consolidate_every,
@@ -542,7 +613,10 @@ def session_list(conn) -> list[dict]:
             "SELECT DISTINCT source FROM chat_log WHERE session_id=?", (sid,)).fetchall()]
         preview = ""
         if last:
-            preview = ("you: " if last["role"] == "user" else "waku: ") + last["content"][:80]
+            from waku.runtime.session import strip_tools_note
+
+            text = last["content"] if last["role"] == "user" else strip_tools_note(last["content"])
+            preview = ("you: " if last["role"] == "user" else "agent: ") + text[:80]
         out.append({"id": sid,
                     "title": (first["content"][:60] if first else "(empty)"),
                     "last": preview,
@@ -717,6 +791,14 @@ def transcribe_audio(raw: bytes) -> dict:
             pass
 
 
+def _shown_log(rows: list[dict]) -> list[dict]:
+    """Chat log rows as a person reads them: replies without the model's note."""
+    from waku.runtime.session import strip_tools_note
+
+    return [{**r, "content": strip_tools_note(r["content"])} if r.get("role") == "assistant" else r
+            for r in rows]
+
+
 def _thread_history(conn, sid: str) -> list[dict]:
     """The ONE way to load a thread for the chat dock: role + content + the
     per-turn meta (gate/stats/tools/model) so every card renders in full.
@@ -732,8 +814,21 @@ def _thread_history(conn, sid: str) -> list[dict]:
             "SELECT role, content, meta FROM chat_log WHERE session_id=? ORDER BY id",
             (sid,),
         ).fetchall()
-    return [{"role": r["role"], "content": r["content"],
-             "meta": json.loads(r["meta"]) if r["meta"] else None} for r in rows]
+    from waku.runtime.session import strip_tools_note
+
+    # the model's [tools used: ...] note is never shown (session.add_exchange)
+    return [{"role": r["role"],
+             "content": strip_tools_note(r["content"]) if r["role"] == "assistant" else r["content"],
+             "meta": _shown_meta(r["meta"])} for r in rows]
+
+
+def _shown_meta(raw) -> dict | None:
+    """A turn's meta for the page: without the model's tool note."""
+    if not raw:
+        return None
+    meta = json.loads(raw)
+    meta.pop("tools_note", None)
+    return meta
 
 
 def session_action(payload: dict) -> dict:
@@ -820,7 +915,7 @@ def memory_action(payload: dict) -> dict:
         text = (payload.get("content") or "").strip()
         if not text:
             return {"error": "SOUL cannot be empty"}
-        (settings.home / "SOUL.md").write_text(text + "\n", encoding="utf-8")
+        (settings.home / "SOUL.md").write_text(text + "\n")
         return {"ok": True}
     if action == "save_skill":
         # Edit any loaded SKILL.md by hand (same file the agent's create_skill
@@ -891,15 +986,43 @@ def events_since(cursor):
     return {"events": out, "cursor": len(lines)}
 
 
-# Content types for /static/. .woff2 is here because the dashboard serves its
-# own fonts (static/design/fonts.css) instead of fetching them.
-STATIC_TYPES = {".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
-                ".html": "text/html; charset=utf-8", ".woff2": "font/woff2"}
-
-
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, body: bytes, ctype: str, *, no_cache: bool = False) -> None:
-        self.send_response(200)
+    def end_headers(self):
+        # Every response path (do_GET's _send, do_POST's _send, and the raw
+        # SSE writes in do_POST) ends up here, so one override covers all of
+        # them — no need to sprinkle CORS headers at each call site.
+        self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        # Browsers preflight cross-origin POSTs with JSON bodies (the Lovable
+        # frontend's fetch to /api/chat) before sending the real request.
+        # No auth check here: preflight requests never carry the Authorization
+        # header (the browser is asking permission to send it, not sending it
+        # yet) — that's normal CORS behavior, not a bypass.
+        self.send_response(204)
+        self.end_headers()
+
+    def _authorized(self) -> bool:
+        if not API_KEY:  # auth disabled — unchanged local/dev behavior
+            return True
+        # constant-time: the server may be open to the network (WAKU_DASHBOARD_HOST)
+        given = self.headers.get("Authorization", "").encode()
+        return hmac.compare_digest(given, f"Bearer {API_KEY}".encode())
+
+    def _reject_unauthorized(self) -> None:
+        body = b'{"error": "unauthorized"}'
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send(self, body: bytes, ctype: str, *, no_cache: bool = False,
+              status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         # The frontend files (app.js/style.css) change as we develop; without
@@ -910,6 +1033,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path.startswith("/api/") and not self._authorized():
+            self._reject_unauthorized()
+            return
         if self.path == "/api/data":
             self._send(json.dumps(collect(), default=str).encode(), "application/json")
         elif self.path == "/api/compare/history":
@@ -981,6 +1107,60 @@ class Handler(BaseHTTPRequestHandler):
             raw = parse_qs(urlparse(self.path).query).get("cursor", [None])[0]
             cursor = int(raw) if raw and raw.lstrip("-").isdigit() else None
             self._send(json.dumps(events_since(cursor)).encode(), "application/json")
+        elif self.path.startswith("/api/tender/"):
+            # The tender archive: /api/tender/<case>/nit.pdf serves the notice,
+            # /api/tender/<case>/documents lists what the case holds.
+            #
+            # This is the route nit-forge-ui/src/lib/tender-ref.ts was written
+            # against and documented as "NOT BUILT YET". Clicking a reference
+            # like PUR-MNTPLN-1005566 in either module now opens the actual
+            # scanned notice from the corpus, so a citation is checkable rather
+            # than merely quotable.
+            from urllib.parse import unquote
+
+            from waku.tools import tender_archive
+
+            parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
+            # ['api', 'tender', '<case>', '<leaf>']
+            case_key = parts[2] if len(parts) > 2 else ""
+            leaf = parts[3] if len(parts) > 3 else "documents"
+            kg_url = getattr(load_settings(), "kg_url", "")
+
+            if leaf == "documents":
+                self._send(json.dumps(tender_archive.documents(case_key, kg_url),
+                                       default=str).encode(), "application/json")
+                return
+
+            found = tender_archive.best_notice(case_key, kg_url)
+            if not found:
+                # A miss is a state the UI renders, not an error it toasts.
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
+                body = json.dumps({
+                    "case_key": case_key,
+                    "error": "no notice on file for this case",
+                }).encode()
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            data, content_type, filename = found
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            # inline: the point is to READ it in the preview pane. A download
+            # would take the officer out of the conversation they are in.
+            self.send_header("Content-Disposition",
+                              f'inline; filename="{filename}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", CORS_ORIGIN)
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path.startswith("/api/nam/case/"):
+            # the NAM case of the PR Creation Flow (waku/nam/case.py) as JSON,
+            # or its estimate.xlsx / pr.xlsx; the caller's tenant only
+            self._nam_case_get()
         elif self.path.startswith("/api/reveal"):
             from urllib.parse import parse_qs, unquote, urlparse
 
@@ -998,10 +1178,59 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        ctype = STATIC_TYPES.get(target.suffix, "application/octet-stream")
+        ctype = {".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
+                 ".html": "text/html; charset=utf-8"}.get(target.suffix, "application/octet-stream")
         self._send(target.read_bytes(), ctype, no_cache=True)
 
+    def _actor(self):
+        """(the identity context the request carries or None, the error when
+        it is partial or malformed): Waku consumes it, never authenticates."""
+        from waku.nam import identity
+
+        try:
+            return identity.from_headers(self.headers), ""
+        except identity.BadIdentity as exc:
+            return None, str(exc)
+
+    def _nam_case_get(self) -> None:
+        from contextlib import nullcontext
+
+        from waku.nam import case as nam_case
+
+        parts = [p for p in self.path.split("?")[0].split("/") if p][3:]
+        case_id = parts[0] if parts else ""
+        leaf = parts[1] if len(parts) > 1 else ""
+        actor, bad = self._actor()
+        if bad:
+            self._send(json.dumps({"error": bad}).encode(), "application/json", status=401)
+            return
+        with nam_case.acting(actor) if actor else nullcontext():
+            with agent_lock:
+                agent = get_agent()
+                try:
+                    data = nam_case.load(agent.conn, case_id)
+                except nam_case.NotYours:
+                    data = None
+                home = agent.settings.home
+        if data is None:
+            self._send(json.dumps({"error": f"no case {case_id}"}).encode(), "application/json",
+                       status=404)
+            return
+        if leaf in ("estimate.xlsx", "pr.xlsx"):
+            path = home / "nam" / case_id / leaf
+            if not path.is_file():
+                self._send(json.dumps({"error": f"{leaf} is not written yet"}).encode(),
+                           "application/json", status=404)
+                return
+            self._send(path.read_bytes(), "application/vnd.openxmlformats-officedocument."
+                       "spreadsheetml.sheet")
+            return
+        self._send(json.dumps(data, default=str).encode(), "application/json", no_cache=True)
+
     def do_POST(self):
+        if not self._authorized():
+            self._reject_unauthorized()
+            return
         length = int(self.headers.get("Content-Length", 0))
         # /api/voice takes a raw audio blob, not JSON — handle it first.
         if self.path == "/api/voice":
@@ -1012,6 +1241,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/chat/stream":
             payload = json.loads(self.rfile.read(length) or "{}")
             message = (payload.get("message") or "").strip()
+            session_id = (payload.get("session_id") or "").strip() or None
+            actor, bad = self._actor()
+            if bad:
+                self._send(json.dumps({"error": bad}).encode(), "application/json", status=401)
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -1028,7 +1262,7 @@ class Handler(BaseHTTPRequestHandler):
                 emit("done", {"error": "empty message"})
                 return
             try:
-                chat_stream(message, emit)
+                chat_stream(message, emit, session_id=session_id, actor=actor)
             except Exception as exc:  # surface as a terminal event, don't 500
                 emit("done", {"error": f"{type(exc).__name__}: {exc}"})
             return
@@ -1139,7 +1373,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/chat":
                 message = (payload.get("message") or "").strip()
-                out = chat(message) if message else {"error": "empty message"}
+                session_id = (payload.get("session_id") or "").strip() or None
+                actor, bad = self._actor()
+                out = ({"error": bad} if bad else
+                       chat(message, session_id=session_id, actor=actor) if message
+                       else {"error": "empty message"})
             elif self.path == "/api/connections":
                 result = apply_integration(payload.get("key", ""), payload.get("values") or {},
                                            tuple(payload.get("clear") or ()), force=bool(payload.get("force")))
@@ -1168,12 +1406,39 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     # Port precedence: WAKU_DASHBOARD_PORT, then the conventional PORT (used by
-    # deploy platforms and IDE preview panes), then 7777. If it's taken, walk on.
-    base = int(os.getenv("WAKU_DASHBOARD_PORT") or os.getenv("PORT") or PORT)
-    for port in range(base, base + 10):  # walk past a busy port instead of crashing
+    # deploy platforms and IDE preview panes), then 7777.
+    requested = os.getenv("WAKU_DASHBOARD_PORT") or os.getenv("PORT") or ""
+    base = int(requested or PORT)
+    # An EXPLICIT port is a requirement, not a preference. The walk below exists
+    # so an unconfigured run does not crash on a busy default — but when someone
+    # has named the port, walking silently to the next one is the wrong help:
+    # the frontend, a bookmark and a forwarded tunnel all still point at the
+    # port that was asked for, and they end up talking to nothing, or worse, to
+    # whatever else is on the port it drifted to. So a named port is strict.
+    strict = bool(requested)
+    # Bind address. 127.0.0.1 stays the default — this server has no auth
+    # unless WAKU_DASHBOARD_KEY is set, and it can read and write the user's
+    # memory, calendar and NIT drafts, so it must not become reachable by
+    # accident. WAKU_DASHBOARD_HOST=0.0.0.0 opts into LAN access for the case
+    # this exists for: a browser on another machine using the frontend against
+    # this backend, where SSH/IDE port forwarding is not available. Set
+    # WAKU_DASHBOARD_KEY whenever you widen this.
+    host = os.getenv("WAKU_DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if host != "127.0.0.1" and not os.getenv("WAKU_DASHBOARD_KEY", ""):
+        print(f"warning: binding {host} with no WAKU_DASHBOARD_KEY — "
+              f"anything that can route here can read and write this Waku's data")
+    candidates = [base] if strict else range(base, base + 10)
+    for port in candidates:
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-        except OSError:
+            server = ThreadingHTTPServer((host, port), Handler)
+        except OSError as exc:
+            if strict:
+                raise SystemExit(
+                    f"port {port} is not available ({exc}). WAKU_DASHBOARD_PORT/PORT asked for "
+                    f"this port specifically, so Waku will not start somewhere else — whatever "
+                    f"points at {port} would then be talking to the wrong process. Free it "
+                    f"(ss -ltnp | grep {port}) or set a different port."
+                ) from exc
             print(f"port {port} busy, trying {port + 1}…")
             continue
         # One owner for gateway lifecycle: configuration saves can now stop and
@@ -1196,7 +1461,8 @@ def main() -> None:
         register_gateway_status_provider(supervisor.status)
         register_gateway_reloader(supervisor.reconcile)
         supervisor.reconcile()
-        print(f"Waku dashboard → http://localhost:{port}  (Ctrl-C to stop)")
+        shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+        print(f"Waku dashboard → http://{shown}:{port}  (Ctrl-C to stop)")
         try:
             server.serve_forever()
         finally:

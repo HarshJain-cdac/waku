@@ -24,25 +24,44 @@ function archSVG(d){
     <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" class="head"/></marker></defs>
 
-    <!-- HARNESS container: everything runs on your laptop, including the
-         offline LLM Ops loop (tinted sub-panel) -->
+    <!-- HARNESS container: everything runs on this server (the agent, the NAM
+         harness, the offline LLM Ops loop in the tinted sub-panel); the model
+         server and the KG are separate services it calls over HTTP.
+         knowledge.md describes every box. -->
     <!-- border at y=10 so the arc's label at y=28 sits clear of the dashes -->
     <rect class="container" x="12" y="10" width="1020" height="638" rx="16"/>
-    ${lbl(16,-2,"HARNESS — runs on your laptop · the turn inside is ephemeral")}
+    ${lbl(16,-2,"HARNESS — runs on this server · the turn inside is ephemeral")}
 
     <!-- the turn: gateway → working memory → loop → reply -->
-    ${box(32,72,128,56,"Gateway","cli · voice · web","chat","","gateway")}
-    ${flow("M160 100 L192 100","","e-gw-wm")}
-    ${box(192,72,144,56,"Working memory","assembled per turn","memory/overview","","wm")}
+    ${box(28,72,96,56,"Gateway","web · cli · apps","chat","","gateway")}
+    ${flow("M124 100 L146 100","","e-gw-intent")}
+    <!-- The intent node. No model call — it reads the message and labels the
+         turn, which is why it can answer a greeting in milliseconds instead of
+         waiting on the inference queue. See waku/tools/intent.py. -->
+    ${box(146,72,100,56,"Intent","rules · no LLM","loop","","intent")}
+    ${flow("M246 100 L262 100","","e-intent-wm")}
+    ${box(262,72,96,56,"Working memory","per turn","memory/overview","","wm")}
+    <!-- a greeting never reaches the loop: it turns straight back out -->
+    <path class="flow dash" data-edge="e-intent-fast" d="M196 72 C196 54 182 50 156 50 L92 50 C80 50 76 58 76 72"/>
+    ${flowLbl(138,46,"greeting → instant reply","middle")}
 
     <rect class="loopbox" x="370" y="56" width="168" height="166" rx="12"/>
     ${lbl(384,48,"LOOP")}
     ${box(384,72,140,50,"LLM agent","reason","loop","","llm")}
-    ${box(384,152,140,52,"Tools","create_event…","tools","","tools")}
+    ${box(384,152,140,52,"Tools","kg_* · nam · notes","tools","","tools")}
     ${flow("M448 122 L448 152")}${flow("M470 152 L470 122")}
     ${flowLbl(456,141,"act")}
-    ${flow("M336 100 L370 100","","e-wm-loop")}
+    ${flow("M358 100 L370 100","","e-wm-loop")}
     ${flow("M538 100 L558 106")}${flowLbl(542,93,"reply")}
+    <!-- MODEL SERVER — the brain is not in this process: every model call
+         (the loop, the retrieval gate, NAM's model steps) goes over HTTP to
+         the OpenAI-compatible server (waku/loop/models.py is the client). -->
+    ${flow("M524 112 C536 130 540 150 552 162","dash","e-llm-model")}
+    <g class="node" data-node="model" onclick="location.hash='models'">
+      <rect class="bx" x="552" y="150" width="100" height="56" rx="9"/>
+      <text class="nt" x="563" y="173">Model server</text>
+      <text class="ns" x="563" y="191">over HTTP</text>
+    </g>
     ${box(558,84,104,52,"Reply","→ back to you","loop","","reply")}
     <!-- The gateway is the door IN and OUT: the reply leaves through the very
          gateway it arrived at (Telegram sends it, the CLI prints it, voice
@@ -53,6 +72,22 @@ function archSVG(d){
          then left into the consolidation box -->
     <path class="flow dash" data-edge="e-reply-save" d="M650 136 C660 150 660 200 660 600 L430 600" marker-end="url(#arr)"/>
     ${flowLbl(668,214,"save chats",'start')}
+
+    <!-- KNOWLEDGE GRAPH — a separate read-only service. The five kg_* tools
+         reach it over HTTP (waku/nam/kg_tools.py -> the KG's precedent_api on
+         :8077 -> NebulaGraph + pgvector), and so do the NAM harness's
+         contracts. It lights on the "kg" event the tools emit, so you can SEE
+         when a turn consults NRL's tender history. -->
+    ${flow("M470 204 C470 240 486 248 520 252","dash","e-tools-kg")}
+    ${flowLbl(478,236,"items · tenders · rates · clauses",'start')}
+    <g class="node kgbox" data-node="kg" onclick="location.hash='tools'">
+      <rect class="bx" x="520" y="226" width="200" height="74" rx="9"/>
+      <text class="nt" x="533" y="250">Knowledge graph</text>
+      <text class="ns" x="533" y="268">${d.kg && d.kg.ok
+        ? d.kg.tenders+" tenders · "+d.kg.price_records+" rates"
+        : "not connected"}</text>
+      <text class="ns" x="533" y="286">${d.kg && d.kg.ok ? "over HTTP · precedent API" : "start the KG precedent API"}</text>
+    </g>
 
     <!-- retrieval gate feeding working memory (the hero) -->
     <path class="gate node" data-node="gate" onclick="location.hash='memory/overview'" d="M264 250 L340 296 L264 342 L188 296 Z"/>
@@ -74,6 +109,26 @@ function archSVG(d){
     <!-- consolidation writes back into memory -->
     ${box(44,576,384,52,"Consolidation · every "+d.consolidate_every+" exchanges",d.chat_pending+"/"+d.consolidate_every*2+" queued → distilled into facts","memory/consolidation","","consolidation")}
     ${flow("M340 576 L340 528","","e-consol-sem")}${flowLbl(350,560,"distill")}
+
+    <!-- NAM HARNESS — the Need Assessment Module as one call (waku/nam,
+         POST /api/nam/run from the NAM frontend): router, stage gates S1-S10,
+         guardrails, the flow, verification, audit. It is not a chat turn, so
+         it sits beside the loop, and reads the KG through its contracts. -->
+    <g class="node" data-node="nam">
+      <rect class="bx" x="736" y="436" width="280" height="92" rx="9"/>
+      <text class="nt" x="750" y="460">NAM harness · /api/nam/run</text>
+      <text class="ns" x="750" y="480">router · stages S1–S10 · guardrails · audit</text>
+      <text class="ns" x="750" y="498">chat: driver · capture · fill · journey</text>
+      <text class="ns" x="750" y="516">from the NAM UI and the chat · reads the KG</text>
+    </g>
+    <!-- a chat turn about a need is the harness's before it is the model's
+         (waku/nam/drive.py): a stated need, an answer, "what next", a value
+         to fill. Only what the harness cannot do goes on to the loop. -->
+    ${flow("M222 128 C222 170 166 182 166 230 L166 398 L716 398 C730 398 736 410 736 424","dash","e-intent-nam")}
+    ${flowLbl(452,392,"need, answer or value → harness first",'start')}
+    <!-- up the narrow lane between "save chats" (x 660) and the release
+         arrow's head (x 676), so it crosses neither -->
+    ${flow("M736 482 C696 482 668 462 668 410 L668 300","dash","e-nam-kg")}
 
     <!-- LLM OPS: the offline improvement loop — inside the harness (it all
          runs on the laptop) but a distinct tinted sub-panel -->
@@ -104,39 +159,121 @@ function archSVG(d){
 // this file). test_static_assets.py won't catch a mismatch here; the animation
 // just silently stops lighting a box.
 const STAGE = {
-  turn_start:    {nodes:["gateway","wm"],            edges:["e-gw-wm"],                 label:"message in"},
+  turn_start:    {nodes:["gateway","wm"],            edges:["e-gw-intent","e-intent-wm"], label:"message in"},
   gate:          {nodes:["gate"],                    edges:["e-gate-wm"],               label:"retrieval gate"},
-  llm:           {nodes:["llm"],                     edges:["e-wm-loop"],               label:"agent reasons"},
+  llm:           {nodes:["llm","model"],             edges:["e-wm-loop","e-llm-model"], label:"agent reasons"},
+  intent:        {nodes:["intent"],                  edges:["e-gw-intent","e-intent-wm"], label:"intent"},
   tool:          {nodes:["tools"],                   edges:[],                          label:"tool runs"},
+  kg:            {nodes:["kg","tools"],              edges:["e-tools-kg"],              label:"reading the knowledge graph"},
+  nam:           {nodes:["nam"],                     edges:["e-intent-nam","e-nam-kg"], label:"NAM harness: the case's next step"},
   turn_end:      {nodes:["reply","trace"],           edges:["e-reply-trace","e-reply-save"], label:"reply"},
   consolidation: {nodes:["consolidation","semantic"],edges:["e-consol-sem"],            label:"consolidating memory"},
 };
 let evCursor = null, evQueue = [], playing = false, animating = false;
 
+// A stage's highlight HOLDS until the next stage arrives. That is the whole
+// point of a live diagram: "where is this turn right now". The previous
+// version cleared every highlight after a fixed 1000ms, so a turn that spent
+// twenty seconds waiting on the inference queue flashed the LLM box for one
+// second and then sat dark — the stage you most needed to see was the one it
+// showed least.
+let liveNodes = [], liveEdges = [], turnOpen = false, clearTimer = null;
+
+function paint(sel, cls, on){
+  document.querySelectorAll(sel).forEach(el => el.classList.toggle(cls, on));
+}
+/** Brief flash, for things that genuinely are momentary. */
 function hot(sel, cls, ms){
   document.querySelectorAll(sel).forEach(el => {   // every diagram copy lights up
     el.classList.add(cls);
     setTimeout(()=>el.classList.remove(cls), ms);
   });
 }
+/** Drop the stage we were on, and mark it done on the way out. */
+function releaseStage(){
+  liveNodes.forEach(n => {
+    paint(`[data-node="${n}"]`, "hot", false);
+    hot(`[data-node="${n}"]`, "done", 900);
+  });
+  liveEdges.forEach(e => paint(`[data-edge="${e}"]`, "live", false));
+  liveNodes = []; liveEdges = [];
+}
+function clearAll(){
+  releaseStage();
+  turnOpen = false;
+  document.querySelectorAll(".arch-status").forEach(st => st.innerHTML = "");
+}
+function status(html){
+  document.querySelectorAll(".arch-status").forEach(st =>
+    st.innerHTML = `<span class="live-dot"></span>${html}`);
+}
+
 function animateStage(ev){
   if (GRAPH_KINDS.has(ev.type)) return animateGraphStage(ev);   // graph.js owns these
   const spec = STAGE[ev.type];
-  if (!spec || !document.querySelector(".arch")) return;
-  document.querySelectorAll(".arch-status").forEach(st => st.innerHTML = `<span class="live-dot"></span>${spec.label}`);
-  spec.nodes.forEach(n => hot(`[data-node="${n}"]`, "hot", 1000));
-  spec.edges.forEach(e => hot(`[data-edge="${e}"]`, "live", 1000));
-  if (ev.type==="gate" && ev.decision==="retrieve"){
-    ["procedural","semantic","episodic"].forEach(n => hot(`[data-node="${n}"]`,"hot",1000));
-    ["e-gate-proc","e-gate-sem","e-gate-epi"].forEach(e => hot(`[data-edge="${e}"]`,"live",1000));
+  if (!spec) return;
+  // The status line lives in the dock header too, so a turn is followable even
+  // when the diagram itself is on another view.
+  if (clearTimer){ clearTimeout(clearTimer); clearTimer = null; }
+
+  if (ev.type === "turn_start"){ turnOpen = true; }
+
+  status(spec.label);
+  if (!document.querySelector(".arch")){
+    // No diagram on screen — the status line is still worth updating, and the
+    // held state is meaningless without boxes to hold it on.
+    if (ev.type === "turn_end"){ turnOpen = false; clearTimer = setTimeout(clearAll, 1500); }
+    return;
+  }
+
+  releaseStage();
+  liveNodes = spec.nodes.slice();
+  liveEdges = spec.edges.slice();
+  liveNodes.forEach(n => paint(`[data-node="${n}"]`, "hot", true));
+  liveEdges.forEach(e => paint(`[data-edge="${e}"]`, "live", true));
+
+  if (ev.type === "intent"){
+    // Say WHICH intent, and light the bypass arc only when the turn really
+    // took it — a labelled turn that still ran the loop must not look skipped.
+    status(`intent: ${ev.intent}`);
+    if (ev.intent === "greeting") hot('[data-edge="e-intent-fast"]', "live", 1600);
+    if (ev.intent === "kg" || ev.intent === "nit") paint('[data-node="kg"]', "hot", true);
+  }
+  if (ev.type === "kg"){
+    status(`knowledge graph: ${ev.lane}` + (ev.hits != null ? ` — ${ev.hits} hit(s)` : ""));
+  }
+  if (ev.type === "tool" && ev.tool){
+    status(`tool: ${ev.tool}`);
+  }
+  if (ev.type === "gate" && ev.decision === "retrieve"){
+    ["procedural","semantic","episodic"].forEach(n => {
+      liveNodes.push(n); paint(`[data-node="${n}"]`, "hot", true);
+    });
+    ["e-gate-proc","e-gate-sem","e-gate-epi"].forEach(e => {
+      liveEdges.push(e); paint(`[data-edge="${e}"]`, "live", true);
+    });
+  }
+  if (ev.type === "turn_end"){
+    turnOpen = false;
+    // Hold the finished state briefly so the last stage is readable, then go
+    // quiet rather than leaving the diagram lit as if work were still running.
+    clearTimer = setTimeout(clearAll, 1800);
   }
 }
+
 function playNext(){
-  if (!evQueue.length){ playing=false; animating=false;
-    document.querySelectorAll(".arch-status").forEach(st => st.innerHTML=""); return; }
+  if (!evQueue.length){
+    playing = false; animating = false;
+    // Do NOT wipe the status mid-turn. An empty queue between polls means the
+    // turn is still working — most often waiting on the model — and blanking
+    // the diagram there is exactly the moment it should be showing a stage.
+    return;
+  }
   playing = true; animating = true;
   animateStage(evQueue.shift());
-  setTimeout(playNext, 620);   // stagger so stages light up in sequence
+  // Drain fast when several stages arrived together; the HOLD is what makes a
+  // stage readable now, not the gap between them.
+  setTimeout(playNext, evQueue.length > 3 ? 160 : 420);
 }
 async function pollEvents(){
   try{

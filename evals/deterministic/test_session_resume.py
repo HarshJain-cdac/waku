@@ -63,3 +63,21 @@ def test_new_chat_s_prefixed_thread_is_resumed(tmp_path, monkeypatch):
     app = make_waku(tmp_path / "home", client=ScriptedClient([]))
     _seed(app, "s-20260101-120000", age_minutes=3, source="dashboard")
     assert resume_or_new_session(app.conn) == "s-20260101-120000"
+
+
+def test_a_shared_thread_fed_through_the_api_is_resumed(tmp_path, monkeypatch):
+    """Live bug, 2026-11-03: the officer's chat reached the shared thread
+    through /api/chat (source 'api'); a restart resumed only 'dashboard'
+    threads, started an empty one, and the chat lost its open NAM case."""
+    monkeypatch.setenv("WAKU_SESSION_IDLE_MINUTES", "60")
+    app = make_waku(tmp_path / "home", client=ScriptedClient([]))
+    _seed(app, "dashboard-20261103-111409", age_minutes=12, source="api")
+    assert resume_or_new_session(app.conn) == "dashboard-20261103-111409"
+
+
+def test_a_thread_a_client_names_itself_is_not_the_shared_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("WAKU_SESSION_IDLE_MINUTES", "60")
+    app = make_waku(tmp_path / "home", client=ScriptedClient([]))
+    _seed(app, "dashboard-20261103-111409", age_minutes=30, source="api")
+    _seed(app, "px-chat-abc", age_minutes=1, source="api")
+    assert resume_or_new_session(app.conn) == "dashboard-20261103-111409"

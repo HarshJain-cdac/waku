@@ -26,7 +26,8 @@ import pytest
 from waku.memory.procedural.loader import SkillLoader
 
 ROOT = Path(__file__).resolve().parents[2]
-LOADER = SkillLoader([ROOT / "skills"])
+# the repo's skills and the NAM knowledge skills the chat loads with them
+LOADER = SkillLoader([ROOT / "skills", ROOT / "waku" / "nam" / "skills"])
 
 HINT = ("Anchor the description on words specific to the skill's domain "
         "(DAU, interview, standup) — question words like why / what / should / "
@@ -57,40 +58,15 @@ EVERYDAY = [
 # skill loaded together, this is also what catches a new skill taking over an
 # existing skill's messages.
 MESSAGES = {
-    "schedule-meeting": [
-        "schedule coffee with Alex tomorrow at 9am",
-        "book a call with Ian on Friday at 3pm",
-        "put a dentist appointment on my calendar next Tuesday",
-        "set up a meeting with the team on Monday",
-    ],
-    "meeting-prep": [
-        "prep me for my call with Alex",
-        "prep me for tomorrow's standup",
-        "get me ready for the board meeting",
-        "who am I meeting today",
-        "brief me on my call with the investors",
-        "what should I know before my meeting with Ian",
-    ],
-    "weekly-brief": [
-        "brief me on my week",
-        "what's on my week",
-        "what should I focus on today",
-        "how does my day look",
-        "catch me up on this week",
-        "give me my morning briefing",
-    ],
-    "da-anomaly-analysis": [
-        "why did DAU drop last week",
-        "GMV spiked yesterday, what caused it",
-        "conversion rate fell 20%, help me with metric attribution",
-        "retention dropped after the release",
-    ],
-    "interview-prep": [
-        "prep me for my interview tomorrow",
-        "I have a technical interview at Google on Friday",
-        "help me practice behavioral interview questions",
-        "mock interview me",
-        "what should I revise for my placement interview",
+    "autonomous-work": [
+        "make a checklist plan and execute it step by step",
+        "work through this multi-step task and verify every step",
+        "cite the source for every figure",
+        "verify these facts with evidence before you answer",
+        "the tool failed with a timeout, retry",
+        "the service is unavailable, what fallback",
+        "give me the final report of the finished work",
+        "status update: what is done and what items are open",
     ],
     "waku-memory": [
         "connect waku memory",
@@ -126,3 +102,47 @@ def test_every_skill_named_here_still_exists():
     real = {skill.name for skill in LOADER.skills}
     stale = sorted(set(MESSAGES) - real)
     assert not stale, f"MESSAGES names skills that no longer exist: {stale}"
+
+
+# A skill split into topics loads only the topics a message names
+# (loader.Skill.focus): a PQC question must not carry the BOQ and SCC parts.
+# No shipped skill has topics today, so the case brings its own.
+TOPIC_SKILL = """---
+name: tender-terms
+description: tender terms: pqc, scc, boq, pre-qualification criteria, special conditions, bill of quantities, liquidated damages, clauses of a tender document.
+---
+
+Shared rules for every topic.
+
+## Rules
+terms: extract, extraction rules
+Keep units.
+
+## PQC
+terms: pqc, pre-qualification criteria
+What a bidder must show.
+
+## SCC
+terms: scc, special conditions of contract
+Terms specific to the contract.
+
+## BOQ
+terms: boq, bill of quantities
+The itemised list.
+"""
+TOPICS = {
+    "explain the PQC criteria for this tender": ["PQC"],
+    "what does the SCC say about liquidated damages": ["SCC"],
+    "explain the bill of quantities for this tender": ["BOQ"],
+    "extract the PQC clauses from this document": ["Rules", "PQC"],
+}
+
+
+@pytest.mark.parametrize("message", sorted(TOPICS))
+def test_a_topic_skill_loads_only_the_topics_named(message, tmp_path):
+    (tmp_path / "tender-terms").mkdir()
+    (tmp_path / "tender-terms" / "SKILL.md").write_text(TOPIC_SKILL, encoding="utf-8")
+    skill = SkillLoader([tmp_path]).match(message)[0]
+    loaded = [line[3:].split()[0] for line in skill.focus(message).splitlines()
+              if line.startswith("## ")]
+    assert loaded == TOPICS[message], (message, loaded)

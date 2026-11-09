@@ -68,11 +68,11 @@ function memOverview(d){
   ].map(([t,sub,n,desc]) => uiCard(`<span>${desc}</span>`,
       {title: t, action: uiLink(n, `#memory/${sub}`), cls: "box"})).join("");
   return uiNotice("note", `<b>Memory vs Database — two views of one file.</b>
-      <div class="r">This tab is the curated, per-pillar view of what Waku remembers. The
+      <div class="r">This tab is the curated, per-pillar view of what the agent remembers. The
       ${uiLink("Database tab", "#database")} shows the exact same
       thing as raw SQLite tables (plus the FTS5 keyword index). Same
       <code>.waku/state.db</code> — different altitude.
-      <br><br>Some assistants (Hermes) keep memory as a single <code>MEMORY.md</code> file. Waku keeps
+      <br><br>Some assistants (Hermes) keep memory as a single <code>MEMORY.md</code> file. This agent keeps
       the queryable source in <code>state.db</code> (facts + episodes, FTS5-searchable) <b>and</b> writes a
       human-readable ${reveal("MEMORY.md","MEMORY.md")} mirror after every turn — so you get both: a real file
       you can open, backed by a sturdy database.</div>`) + `
@@ -85,7 +85,7 @@ function memOverview(d){
     <div class="meta" style="margin-top:var(--space-3)">Files: ${reveal("state.db","state.db")} · ${reveal("MEMORY.md","MEMORY.md")} · ${reveal("SOUL.md","SOUL.md")} · ${reveal("skills","skills/")}</div>`;
 }
 function memSemantic(d){
-  let h = `<div class="meta" style="margin-bottom:var(--space-3)">Durable facts distilled from what you tell Waku —
+  let h = `<div class="meta" style="margin-bottom:var(--space-3)">Durable facts distilled from what you tell the agent —
     the smallest, most-reused store. Edit or forget any of them; changes are live next turn.</div>`;
   // editFact (memory.js) finds the row #fact-N, swaps its .fc for a textarea
   // and its last cell for save/cancel, so the row carries the id.
@@ -113,7 +113,7 @@ function memEpisodic(d){
 }
 function memSkills(d){
   let h = `<div class="meta" style="margin-bottom:var(--space-3)">Procedural memory — markdown instructions loaded
-    only when a message matches. Add your own three ways: teach Waku in chat (it calls
+    only when a message matches. Add your own three ways: teach it in chat (it calls
     <code>create_skill</code>), edit a skill below, or drop a <code>SKILL.md</code> into ${reveal("skills","the skills folder")}.</div>`;
   h += d.skills.map((sk,i) => {
     const full = `---
@@ -133,8 +133,8 @@ ${sk.body}`;
   return h;
 }
 function memSoul(d){
-  return `<div class="meta" style="margin-bottom:var(--space-3)">SOUL.md is Waku's persona — the system prompt it
-    loads every turn. Editing it changes who your Waku is. Changes are live next turn.</div>
+  return `<div class="meta" style="margin-bottom:var(--space-3)">SOUL.md is the agent's persona — the system prompt it
+    loads every turn. Editing it changes who your agent is. Changes are live next turn.</div>
     ${uiCard(`<textarea id="soul" class="editor" style="min-height:260px"
       oninput="dirty('soul-save')" onfocus="markEditing()">${esc(d.soul||"")}</textarea>
     <div style="margin-top:var(--space-2)">${uiButton("Save SOUL.md", {level: "primary", onclick: "saveSoul()", attrs: 'id="soul-save" disabled'})}
@@ -179,7 +179,7 @@ function toolsResults(d){
 function toolsMCP(t){
   const m = t.mcp;
   let h = uiNotice(m.live ? "ok" : "note", `<b>Model Context Protocol${m.live?" — connected":m.configured?" — configured":" — not set up"}.</b>
-    <div class="r">MCP lets Waku borrow tools from any external server (files, GitHub, a database, …),
+    <div class="r">MCP lets the agent borrow tools from any external server (files, GitHub, a database, …),
     namespaced <code>&lt;server&gt;_&lt;tool&gt;</code>. ${m.configured
       ? `Configured servers: ${m.servers.map(s=>`<code>${esc(s)}</code>`).join(" ")}${m.live?"":" — start a chat to connect them."}`
       : "None configured yet."}</div>`);
@@ -193,7 +193,7 @@ function toolsMCP(t){
     <div class="meta" style="margin-top:var(--space-2)">3 — restart the dashboard. The server's tools appear above under
       ${uiLink("Available ▸ MCP servers", "#tools/available")}, callable in chat.</div>`);
   h += `<div class="meta" style="margin-top:var(--space-3)">The same pattern scales: any MCP server (yours or a vendor's)
-    plugs in the same way — no code changes to Waku. Skills work the same way — drop a <code>SKILL.md</code>
+    plugs in the same way — no code changes needed. Skills work the same way — drop a <code>SKILL.md</code>
     in ${reveal("skills","skills/")}.</div>`;
   return h;
 }
@@ -431,7 +431,7 @@ const VIEWS = {
     ${archSVG(d)}
     <h2>Graph workflows — when a turn needs shape</h2>
     ${graphPanel(d)}
-    <h2>Latest turn</h2>${d.turns.length?turnCard(d.turns[0]):uiCard('<span class="empty">no turns yet — talk to Waku first</span>')}`;
+    <h2>Latest turn</h2>${d.turns.length?turnCard(d.turns[0]):uiCard('<span class="empty">no turns yet — send a message first</span>')}`;
   },
   loop(d){
     return d.turns.length ? d.turns.map(turnCard).join("") : uiCard(`<span class="empty">no turns yet</span>`);
@@ -586,7 +586,7 @@ const VIEWS = {
     h += uiNotice("note", `<b>Database vs Memory.</b> <span class="r">This is the raw persistence layer — the literal SQLite
       tables. The ${uiLink("Memory tab", "#memory")} is the friendly
       view of the same rows (facts, episodes, skills, persona). One file, two altitudes. Where Hermes
-      uses a <code>MEMORY.md</code> file, Waku uses these queryable tables — and mirrors them to a
+      uses a <code>MEMORY.md</code> file, this agent uses these queryable tables — and mirrors them to a
       readable <code>MEMORY.md</code> too.</span>`);
     h += uiCard(`
       <div class="u" style="font-family:var(--face-mono);font-size:var(--text-xs);word-break:break-all">${esc(db.path)}</div>
@@ -682,7 +682,7 @@ const VIEWS = {
     h += (d.trace_tail||[]).length ? table(["event","detail","when"], d.trace_tail.map(e =>
         `<tr><td><code>${esc(e.type)}</code></td><td class="meta">${esc(String(e.detail).slice(0,60))}</td>
           <td class="meta">${esc((e.ts||"").replace("T"," ").slice(0,19))}</td></tr>`))
-      : uiCard(`<span class="empty">no trace lines yet — talk to Waku</span>`);
+      : uiCard(`<span class="empty">no trace lines yet — send a message</span>`);
     h += `<div class="meta" style="margin-top:var(--space-2)">Span waterfalls: <code>make trace</code> + <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317</code>.</div>`;
 
     if (d.wake_scans.length){

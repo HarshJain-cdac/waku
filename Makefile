@@ -9,7 +9,7 @@
 PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 
 .PHONY: run voice telegram discord brief dashboard trace eval eval-judge gate lint
-.PHONY: run voice telegram whatsapp brief dashboard trace eval eval-judge gate lint
+.PHONY: run voice telegram whatsapp brief dashboard nam-eval trace eval eval-judge gate lint
 
 run:            ## chat with Waku in the terminal
 	$(PY) -m waku
@@ -36,6 +36,9 @@ gather:         ## same job as a GRAPH: 4 sources in parallel, then one digest
 # imported module), stop this and re-run it, or the UI shows stale backend data.
 dashboard:      ## everything on one page — http://localhost:7777 (restart after a backend pull)
 	$(PY) -m waku.ops.dashboard
+
+nam-eval:       ## the NAM harness evals (the PR Creation Flow, docs/nam/integration.md)
+	$(PY) -m pytest -q evals/deterministic/nam
 
 trace:          ## deep trace waterfalls (Phoenix) at http://localhost:6006
 	$(PY) -m phoenix.server.main serve

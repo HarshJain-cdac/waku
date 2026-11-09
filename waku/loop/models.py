@@ -18,11 +18,15 @@ spend at all (rate-limited). The dashboard Settings tab lists the live catalog.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 from waku.config import Settings
+
+log = logging.getLogger("waku.models")
 
 
 @dataclass(frozen=True)
@@ -289,8 +293,114 @@ def get_client(settings: Settings):
         kwargs: dict = {"api_key": api_key, "timeout": timeout}
         if base_url:
             kwargs["base_url"] = base_url
-        return anthropic.Anthropic(**kwargs)
-    return OpenAICompatClient(api_key=api_key, base_url=base_url, timeout=timeout)
+        client = anthropic.Anthropic(**kwargs)
+        # fixed temperature here too (the Messages API has no seed)
+        fixed = {k: v for k, v in sampling().items() if k == "temperature"}
+        if fixed and getattr(client, "messages", None) is not None:
+            import functools
+
+            client.messages.create = functools.partial(client.messages.create, **fixed)
+            client.messages.stream = functools.partial(client.messages.stream, **fixed)
+        return client
+    return OpenAICompatClient(api_key=api_key, base_url=base_url, timeout=timeout,
+                              fallback_model=settings.model)
+
+
+_THINK_END = "</think>"
+_TOOL_CALL = re.compile(r"<tool_call>(.*?)(?:</tool_call>|$)", re.DOTALL)
+_XML_FUNCTION = re.compile(r"<function=([^>\s]+)>(.*?)(?:</function>|$)", re.DOTALL)
+_XML_PARAM = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.DOTALL)
+
+
+def _refuses_tools(exc: Exception) -> bool:
+    """The server cannot take `tools` (vLLM without a tool-call parser)."""
+    m = str(exc).lower()
+    return ("enable-auto-tool-choice" in m or "tool-call-parser" in m
+            or "tool choice requires" in m or "does not support tools" in m)
+
+
+def _not_served(exc: Exception) -> bool:
+    """The server does not have this model (404 on the model)."""
+    m = str(exc).lower()
+    return (getattr(exc, "status_code", None) == 404 or "404" in m) and \
+        ("does not exist" in m or "not found" in m or "model" in m)
+
+
+def _param_value(raw: str):
+    """A Qwen XML parameter arrives as bare text. Numbers, booleans, lists and
+    objects come back as JSON; anything that isn't valid JSON is a string."""
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return raw
+
+
+def recover_text_tool_calls(text: str, tool_names: set[str]) -> tuple[str, list[dict]]:
+    """Pull tool calls out of plain reply text, for endpoints that don't parse them.
+
+    A vLLM server started without --tool-call-parser (and --reasoning-parser)
+    hands back Qwen's raw output as `content`: its reasoning, a stray
+    `</think>`, then the call as text, with `tool_calls` empty. The loop sees
+    no call and ends the turn, so the user reads only the reasoning. This finds
+    calls in both formats Qwen emits, the Qwen3-Coder XML
+    (`<function=NAME><parameter=P>V</parameter></function>`) and the Hermes
+    JSON (`{"name": ..., "arguments": {...}}`), each inside `<tool_call>`.
+
+    Returns (text with the reasoning and the call markup removed, calls), each
+    call a dict {name, input}. Only calls to a tool in `tool_names` count, so
+    prose that merely mentions a tag is left alone.
+    """
+    if _THINK_END in text:
+        text = text.rsplit(_THINK_END, 1)[1]
+    calls: list[dict] = []
+    for body in _TOOL_CALL.findall(text):
+        found = [(name, {k: _param_value(v) for k, v in _XML_PARAM.findall(inner)})
+                 for name, inner in _XML_FUNCTION.findall(body)]
+        if not found:
+            try:
+                obj = json.loads(body.strip())
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict) and isinstance(obj.get("name"), str):
+                args = obj.get("arguments", obj.get("parameters", {}))
+                if isinstance(args, str):
+                    args = _param_value(args)
+                found = [(obj["name"], args if isinstance(args, dict) else {})]
+        calls += [{"name": n, "input": a} for n, a in found if n in tool_names]
+    if calls:
+        text = _TOOL_CALL.sub("", text)
+    return text.strip(), calls
+
+
+def _recovered_blocks(text: str, tools) -> tuple[list, bool]:
+    """Content blocks for a reply that carried no native tool_calls: the
+    cleaned text, plus any tool calls recovered from it. The bool says whether
+    any were recovered (i.e. whether the stop reason is tool_use)."""
+    names = {t["name"] for t in tools or []}
+    clean, calls = recover_text_tool_calls(text, names) if text else ("", [])
+    blocks = [SimpleNamespace(type="text", text=clean)] if clean else []
+    blocks += [SimpleNamespace(type="tool_use", id=f"call_text_{i}", name=c["name"],
+                               input=c["input"], extra=None)
+               for i, c in enumerate(calls)]
+    return blocks, bool(calls)
+
+
+def sampling() -> dict:
+    """Temperature and seed for every model call: WAKU_TEMPERATURE (default 0)
+    and WAKU_SEED (default 7). Left to the server, each model samples at its
+    own default (often 1.0), so the same question got a different answer each
+    time and from each model. An empty value sends nothing for that setting."""
+    out: dict = {}
+    for key, env, default, cast in (("temperature", "WAKU_TEMPERATURE", "0", float),
+                                    ("seed", "WAKU_SEED", "7", int)):
+        raw = os.getenv(env, default).strip()
+        if raw:
+            try:
+                out[key] = cast(raw)
+            except ValueError:
+                log.warning("%s=%r is not a number; not sent", env, raw)
+    return out
 
 
 class OpenAICompatClient:
@@ -299,13 +409,40 @@ class OpenAICompatClient:
     between the two wire formats — worth reading once.
     """
 
-    def __init__(self, api_key: str, base_url: str | None = None, timeout: float = 120.0):
+    # Two server shortcomings are handled here, once each, and remembered for
+    # the client's life, so the user never sees them on a turn:
+    #   a vLLM server started without --enable-auto-tool-choice and
+    #   --tool-call-parser refuses any request with `tools` (HTTP 400). The
+    #   client then switches to TEXT TOOLS: the tools are described in the
+    #   system prompt, the model writes <tool_call>{...}</tool_call>, and
+    #   recover_text_tool_calls reads it back (WAKU_TOOL_MODE=text forces it,
+    #   =native turns the fallback off).
+    #   a model the server does not serve (404, e.g. a small model it never
+    #   loaded) is answered by `fallback_model` (the main model) instead.
+    text_tools = False
+    fallback_model: str | None = None
+    _missing: frozenset = frozenset()
+
+    def __init__(self, api_key: str, base_url: str | None = None, timeout: float = 120.0,
+                 fallback_model: str | None = None):
         import openai
 
-        self._client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        # one retry, not the SDK's two: a hung server must not hold a turn for
+        # three full timeouts
+        self._client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout,
+                                     max_retries=1)
         self.messages = SimpleNamespace(create=self._create, stream=self._stream)
+        self.fallback_model = fallback_model
+        mode = os.getenv("WAKU_TOOL_MODE", "auto").strip().lower()
+        self.text_tools = mode == "text"
+        self._tool_fallback = mode != "native"
+        # the same question gets the same answer: fixed sampling (sampling())
+        self.sampling = sampling()
 
     def _to_openai(self, *, model, messages, max_tokens, system=None, tools=None) -> dict:
+        if tools and self.text_tools:
+            return self._to_openai_text(model=model, messages=messages, max_tokens=max_tokens,
+                                        system=system, tools=tools)
         oai_messages = []
         if system:
             oai_messages.append({"role": "system", "content": system})
@@ -351,13 +488,80 @@ class OpenAICompatClient:
             ]
         return kwargs
 
+    def _to_openai_text(self, *, model, messages, max_tokens, system=None, tools=()) -> dict:
+        """The same request for a server that cannot take `tools`: the tools
+        described in the system prompt (compactly: a schema is sent once per
+        call, so its size is paid every call), earlier calls and results as
+        text in the conversation."""
+        lines = ["", "Tools. To use one, reply with nothing but one line per call:",
+                 '<tool_call>{"name": "<tool>", "arguments": {...}}</tool_call>',
+                 "Then wait for its result. Available:"]
+        for t in tools:
+            params = (t.get("input_schema") or {}).get("properties") or {}
+            need = (t.get("input_schema") or {}).get("required") or []
+            sig = ", ".join(f"{k}{'' if k in need else '?'}: {v.get('type', 'any')}"
+                            for k, v in params.items())
+            lines.append(f"- {t['name']}({sig}): {t['description'][:300]}")
+        # the tool list first: it is the same every call, so a server that
+        # caches prompt prefixes (vLLM --enable-prefix-caching) computes it
+        # once; what changes each turn (time, memory, skills) comes after
+        oai = [{"role": "system", "content": "\n".join(lines[1:]) + "\n\n" + (system or "")}]
+        for message in messages:
+            content = message["content"]
+            if isinstance(content, str):
+                oai.append({"role": message["role"], "content": content})
+            elif message["role"] == "assistant":
+                text = "".join(b.text for b in content if getattr(b, "type", "") == "text")
+                calls = "".join(
+                    "<tool_call>" + json.dumps({"name": b.name, "arguments": b.input})
+                    + "</tool_call>" for b in content if getattr(b, "type", "") == "tool_use")
+                oai.append({"role": "assistant", "content": (text + calls) or "(no reply)"})
+            else:
+                results = [f"<tool_result>{b['content']}</tool_result>" for b in content
+                           if isinstance(b, dict) and b.get("type") == "tool_result"]
+                oai.append({"role": "user", "content": "\n".join(results) or "(no result)"})
+        return {"model": model, "messages": oai, "max_completion_tokens": max_tokens}
+
     def _call(self, kwargs: dict, **extra):
         """Run chat.completions.create with the max_tokens key-name fallback
         (older OpenAI-compatible endpoints only know max_tokens, not the newer
         max_completion_tokens). Only retry when the error is ABOUT that param —
         retrying on any error masked the real failure (e.g. a gpt-5.x call would
         fail for some other reason, then the max_tokens retry buried it under a
-        confusing 'use max_completion_tokens' message)."""
+        confusing 'use max_completion_tokens' message). A model the server
+        does not serve goes to the fallback model, once and then always."""
+        if kwargs.get("model") in self._missing and self.fallback_model:
+            kwargs = {**kwargs, "model": self.fallback_model}
+        try:
+            return self._call_once(kwargs, **extra)
+        except Exception as exc:
+            model = kwargs.get("model")
+            if not (self.fallback_model and model != self.fallback_model and _not_served(exc)):
+                raise
+            log.warning("model %s is not served by this endpoint: using %s instead",
+                        model, self.fallback_model)
+            self._missing = self._missing | {model}
+            return self._call_once({**kwargs, "model": self.fallback_model}, **extra)
+
+    def _call_once(self, kwargs: dict, **extra):
+        # fixed sampling unless the caller set its own; a model that refuses a
+        # setting (some reasoning models take only temperature 1) loses that
+        # setting, once and then always
+        fixed = getattr(self, "sampling", {})
+        kwargs = {**{k: v for k, v in fixed.items() if k not in kwargs}, **kwargs}
+        try:
+            return self._call_sampled(kwargs, **extra)
+        except Exception as exc:
+            dropped = [k for k in fixed if k in str(exc).lower() and k in kwargs]
+            if not dropped:
+                raise
+            log.warning("the model refuses %s: sending it without", ", ".join(dropped))
+            for k in dropped:
+                fixed.pop(k, None)
+                kwargs.pop(k, None)
+            return self._call_sampled(kwargs, **extra)
+
+    def _call_sampled(self, kwargs: dict, **extra):
         try:
             return self._client.chat.completions.create(**kwargs, **extra)
         except Exception as exc:
@@ -368,9 +572,36 @@ class OpenAICompatClient:
             k["max_tokens"] = k.pop("max_completion_tokens", None)
             return self._client.chat.completions.create(**k, **extra)
 
+    def _with_tools(self, build, send):
+        """send(build()), and when the server refuses tools, the same request
+        again in text-tool mode (remembered)."""
+        try:
+            return send(build())
+        except Exception as exc:
+            if self.text_tools or not getattr(self, "_tool_fallback", True) \
+                    or not _refuses_tools(exc):
+                raise
+            log.warning("the endpoint refuses tool calling (%s): describing tools in the "
+                        "prompt instead", str(exc)[:120])
+            self.text_tools = True
+            return send(build())
+
     def _create(self, *, model, messages, max_tokens, system=None, tools=None):
-        response = self._call(self._to_openai(
-            model=model, messages=messages, max_tokens=max_tokens, system=system, tools=tools))
+        return self.create(model=model, messages=messages, max_tokens=max_tokens,
+                           system=system, tools=tools)
+
+    def create(self, *, model, messages, max_tokens, system=None, tools=None, extra=None):
+        """messages.create with provider options the Anthropic shape has no
+        place for, e.g. extra={"reasoning_effort": "low"} (waku/nam/llm.py)."""
+        response = self._with_tools(
+            lambda: self._to_openai(model=model, messages=messages, max_tokens=max_tokens,
+                                    system=system, tools=tools),
+            lambda kwargs: self._call(kwargs, **(extra or {})))
+        return self._message(response, model, tools)
+
+    def _message(self, response, model, tools):
+        """One chat.completions response → the Anthropic-shaped message.
+        `tools` needs only each tool's "name" (for recovering text calls)."""
         if not getattr(response, "choices", None):
             # some OpenAI-compatible endpoints (e.g. OpenRouter on a rate
             # limit) return 200 with an error body and no choices: surface
@@ -379,7 +610,10 @@ class OpenAICompatClient:
             raise RuntimeError(f"{model}: {err}")
         choice = response.choices[0].message
         blocks = []
-        if choice.content:
+        recovered = False
+        if not choice.tool_calls:
+            blocks, recovered = _recovered_blocks(choice.content or "", tools)
+        elif choice.content:
             blocks.append(SimpleNamespace(type="text", text=choice.content))
         for call in choice.tool_calls or []:
             blocks.append(SimpleNamespace(
@@ -392,8 +626,11 @@ class OpenAICompatClient:
                 extra=getattr(call, "extra_content", None),
             ))
         usage = getattr(response, "usage", None)
+        # a reply cut off at max_tokens says so, as Anthropic's does
+        cut = getattr(response.choices[0], "finish_reason", "") == "length"
         return SimpleNamespace(
-            stop_reason="tool_use" if choice.tool_calls else "end_turn",
+            stop_reason="tool_use" if choice.tool_calls or recovered
+            else "max_tokens" if cut else "end_turn",
             usage=SimpleNamespace(
                 input_tokens=getattr(usage, "prompt_tokens", 0),
                 output_tokens=getattr(usage, "completion_tokens", 0),
@@ -405,9 +642,9 @@ class OpenAICompatClient:
         """Anthropic-shaped streaming over an OpenAI chat.completions stream —
         same two-format bridge as _create, but yielding text as it arrives.
         Used by the loop when stream=True (e.g. the dashboard's live chat)."""
-        kwargs = self._to_openai(
-            model=model, messages=messages, max_tokens=max_tokens, system=system, tools=tools)
-        return _OpenAIStream(self, kwargs)
+        args = {"model": model, "messages": messages, "max_tokens": max_tokens,
+                "system": system, "tools": tools}
+        return _OpenAIStream(self, self._to_openai(**args), args)
 
 
 class _OpenAIStream:
@@ -415,12 +652,20 @@ class _OpenAIStream:
     .text_stream for text deltas, then .get_final_message() for the assembled
     Anthropic-shaped response (text + reassembled tool calls + usage)."""
 
-    def __init__(self, client: OpenAICompatClient, kwargs: dict):
+    def __init__(self, client: OpenAICompatClient, kwargs: dict, args: dict | None = None):
         self._client = client
         self._kwargs = kwargs
+        self._args = args                   # to rebuild the request in text-tool mode
+        # the tool names, whichever way the tools travel (native or in the prompt)
+        self._names = ([{"name": t["name"]} for t in (args or {}).get("tools") or []]
+                       or [{"name": t["function"]["name"]} for t in kwargs.get("tools") or []])
         self._text: list[str] = []
         self._tools: dict[int, dict] = {}   # index → {id, name, args}
         self._usage = None
+        # called once when the model starts sending reasoning (vLLM's
+        # reasoning_content), so a live UI says "Reasoning" only when it is
+        self.on_reasoning = None
+        self._reasoned = False
 
     def __enter__(self):
         return self
@@ -430,17 +675,44 @@ class _OpenAIStream:
 
     @property
     def text_stream(self):
-        stream = self._client._call(
-            self._kwargs, stream=True, stream_options={"include_usage": True})
+        def build():
+            if self._args is not None:
+                self._kwargs = self._client._to_openai(**self._args)
+            return self._kwargs
+
+        def send(kwargs):
+            # the first chunk is where a refused request raises
+            chunks = iter(self._client._call(kwargs, stream=True,
+                                             stream_options={"include_usage": True}))
+            return chunks, next(chunks, None)
+
+        if self._args is not None:
+            stream, first = self._client._with_tools(build, send)
+        else:
+            stream, first = send(self._kwargs)
+        yield from self._consume(stream, first)
+
+    def _consume(self, stream, first):
+        import itertools
+
+        stream = itertools.chain([first] if first is not None else [], stream)
         for chunk in stream:
             if getattr(chunk, "usage", None):
                 self._usage = chunk.usage
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            if not self._reasoned and (getattr(delta, "reasoning_content", None)
+                                       or getattr(delta, "reasoning", None)):
+                self._reasoned = True
+                if self.on_reasoning:
+                    self.on_reasoning()
             if getattr(delta, "content", None):
                 self._text.append(delta.content)
-                yield delta.content
+                # a call arriving as text (see recover_text_tool_calls) is
+                # markup, not reply: stop showing text once it starts
+                if "<tool_call>" not in "".join(self._text):
+                    yield delta.content
             for tc in (getattr(delta, "tool_calls", None) or []):
                 slot = self._tools.setdefault(tc.index, {"id": None, "name": "", "args": ""})
                 if tc.id:
@@ -453,7 +725,18 @@ class _OpenAIStream:
     def get_final_message(self):
         blocks = []
         text = "".join(self._text)
-        if text:
+        recovered = False
+        if not self._tools:
+            names = self._names
+            blocks, recovered = _recovered_blocks(text, names)
+            if not blocks and names:
+                # Some vLLM builds drop a text tool call from the STREAM (the
+                # tokens are counted but never sent), leaving only reasoning
+                # and nothing after it. The same request without streaming
+                # does return the call, so ask once more that way.
+                return self._client._message(
+                    self._client._call(self._kwargs), self._kwargs["model"], names)
+        elif text:
             blocks.append(SimpleNamespace(type="text", text=text))
         for slot in self._tools.values():
             blocks.append(SimpleNamespace(
@@ -461,7 +744,7 @@ class _OpenAIStream:
                 input=json.loads(slot["args"] or "{}")))
         usage = self._usage
         return SimpleNamespace(
-            stop_reason="tool_use" if self._tools else "end_turn",
+            stop_reason="tool_use" if self._tools or recovered else "end_turn",
             usage=SimpleNamespace(
                 input_tokens=getattr(usage, "prompt_tokens", 0),
                 output_tokens=getattr(usage, "completion_tokens", 0)),

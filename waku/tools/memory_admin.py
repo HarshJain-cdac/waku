@@ -50,25 +50,37 @@ def make_manage_memory_tool(memory) -> Tool:
                 return "Only facts can be updated (episodes are historical)."
             ok = facts.update(int(id), content, subject or None)
             return f"Updated fact #{id}." if ok else f"No fact with id {id}."
+        if action == "history":
+            # what a fact said before each correction, and when it was true
+            # (SQLite keeps it in fact_history; the hosted backends do not)
+            if kind != "fact":
+                return "Only facts have a history."
+            if not hasattr(facts, "history"):
+                return "This memory backend keeps no earlier versions of facts."
+            rows = facts.history(int(id))
+            return "\n".join(f"{r['valid_from']} to {r['valid_to']}: [{r['subject']}] "
+                             f"{r['content']}" for r in rows) or f"Fact #{id} was never changed."
         if action == "delete":
             if kind == "episode":
                 # sqlite ids are ints; notion page ids are UUID strings — coerce by shape.
                 rid = int(id) if str(id).isdigit() else str(id)
                 return f"Deleted episode #{id}." if episodes.delete(rid) else f"No episode with id {id}."
             return f"Deleted fact #{id}." if facts.delete(int(id)) else f"No fact with id {id}."
-        return "action must be one of: search, update, delete"
+        return "action must be one of: search, update, history, delete"
 
     return Tool(
         name="manage_memory",
         description=(
             "Search, correct, or delete the user's long-term memory (facts and episodes). "
             "ALWAYS search first to get the id, then update or delete that id. "
-            "Use when the user says something you remember is wrong or should be forgotten."
+            "Use when the user says something you remember is wrong or should be forgotten. "
+            "An update keeps the old version (action history shows what a fact said "
+            "before); delete forgets the fact and its history."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["search", "update", "delete"]},
+                "action": {"type": "string", "enum": ["search", "update", "history", "delete"]},
                 "kind": {"type": "string", "enum": ["fact", "episode"], "description": "default fact"},
                 "id": {"type": ["integer", "string"],
                        "description": "row id (from a prior search); a number for sqlite, a page id string when the notion backend is active"},

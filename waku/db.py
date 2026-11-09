@@ -6,7 +6,10 @@ Open it yourself anytime:  sqlite3 .waku/state.db '.tables'
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 SCHEMA = """
@@ -28,7 +31,21 @@ CREATE TABLE IF NOT EXISTS facts (
     subject TEXT NOT NULL,         -- who/what the fact is about, e.g. 'alex'
     content TEXT NOT NULL,         -- the fact itself
     source TEXT DEFAULT 'user',    -- 'user' (told directly) or 'consolidation'
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    valid_from TEXT DEFAULT (datetime('now'))  -- when this version became current
+);
+-- Earlier versions of a fact: an update closes the old version here instead
+-- of overwriting it, so "what was true before" still has an answer. Deleting
+-- a fact (forgetting it) deletes its history too.
+CREATE TABLE IF NOT EXISTS fact_history (
+    id INTEGER PRIMARY KEY,
+    fact_id INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT,
+    valid_from TEXT,
+    valid_to TEXT DEFAULT (datetime('now')),
+    reason TEXT
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
     subject, content, content=facts, content_rowid=id
@@ -93,15 +110,74 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # each answer was produced, not just the plain text.
         conn.execute("ALTER TABLE chat_log ADD COLUMN meta TEXT")
         conn.commit()
+    fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)").fetchall()}
+    if fact_cols and "valid_from" not in fact_cols:
+        # when the current version of a fact became true (fact_history keeps
+        # the earlier ones). Left empty on existing rows: a fact with none
+        # counts from created_at (the store reads COALESCE), and an UPDATE here
+        # would rewrite every row through the full-text index's trigger.
+        conn.execute("ALTER TABLE facts ADD COLUMN valid_from TEXT")
+        conn.commit()
+
+
+# Schema setups this process has already run, per database file. A schema
+# script takes the write lock even when every table exists, and it ran on
+# every connection (the dashboard opens one per /api/data poll) and on every
+# NAM store call: with several browsers polling while a chat turn wrote, the
+# polls failed with "database is locked". Keyed by the file's identity
+# (device, inode), so a database deleted and created again is set up again.
+_READY: set[tuple] = set()
+_READY_LOCK = threading.Lock()
+
+# How long a statement waits for another connection's write to finish before
+# giving up. A chat turn or a NAM step can hold the write lock for a few
+# seconds; a read that waits it out is better than a page that errors. (WAL
+# would let reads run alongside a write, but .waku can sit on a network
+# filesystem, where WAL's shared-memory file is not safe.)
+BUSY_TIMEOUT_MS = 15000
+
+
+def once(conn: sqlite3.Connection, name: str, setup: Callable[[sqlite3.Connection], None],
+         table: str | None = None) -> None:
+    """Run `setup(conn)` the first time this process sees this database file
+    under `name`; an in-memory database is set up every time. `table`, one the
+    setup creates, is checked with a plain read: a file deleted and created
+    again can get the same inode number, and must still be set up."""
+    row = conn.execute("PRAGMA database_list").fetchone()
+    path = row[2] if row else ""
+    try:
+        st = os.stat(path) if path else None
+    except OSError:
+        st = None
+    if st is None:
+        setup(conn)
+        return
+    key = (st.st_dev, st.st_ino, name)
+    if key in _READY and (table is None or _has(conn, table)):
+        return
+    _READY.discard(key)
+    with _READY_LOCK:
+        if key not in _READY:
+            setup(conn)
+            _READY.add(key)
+
+
+def _has(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (table,)).fetchone() is not None
+
+
+def _setup(conn: sqlite3.Connection) -> None:
+    conn.executescript(SCHEMA)
+    _migrate(conn)
 
 
 def connect(home: Path, check_same_thread: bool = True) -> sqlite3.Connection:
     # check_same_thread=False lets the dashboard's threaded HTTP server reuse
-    # one agent connection across worker threads (guarded by a lock). busy_timeout
-    # avoids "database is locked" when the dashboard reads while a chat writes.
-    conn = sqlite3.connect(home / "state.db", check_same_thread=check_same_thread)
+    # one agent connection across worker threads (guarded by a lock).
+    conn = sqlite3.connect(home / "state.db", check_same_thread=check_same_thread,
+                           timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=3000")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
+    conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    once(conn, "core", _setup, table="chat_log")
     return conn

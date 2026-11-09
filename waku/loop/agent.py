@@ -71,6 +71,8 @@ def run_loop(
                     model=model, system=system, messages=messages,
                     tools=tools.schemas(), max_tokens=max_tokens,
                 ) as s:
+                    if hasattr(s, "on_reasoning"):
+                        s.on_reasoning = lambda i=iteration: notify("reasoning", {"iteration": i})
                     for delta in s.text_stream:
                         notify("text", {"delta": delta})
                     response = s.get_final_message()
@@ -100,6 +102,7 @@ def run_loop(
         # ---- act: execute each requested tool; observe: feed results back
         tool_results = []
         for call in tool_uses:
+            notify("tool_start", {"tool": call.name})   # lets a live UI say what is running
             output = tools.execute(call.name, call.input, notify=notify)
             event = {"tool": call.name, "args": call.input, "output": output}
             result.tool_calls.append(event)

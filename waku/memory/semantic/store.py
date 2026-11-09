@@ -106,21 +106,41 @@ class SqliteFactStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def update(self, fact_id: int, content: str, subject: str | None = None) -> bool:
-        if subject is None:
-            cur = self.conn.execute("UPDATE facts SET content=? WHERE id=?", (content, fact_id))
-        else:
-            cur = self.conn.execute(
-                "UPDATE facts SET content=?, subject=? WHERE id=?",
-                (content, subject.lower().strip(), fact_id),
-            )
+    def update(self, fact_id: int, content: str, subject: str | None = None,
+               reason: str = "updated") -> bool:
+        """Replace a fact. The old version is closed into fact_history (with
+        when it was true), not overwritten, and the fact keeps its id."""
+        old = self.conn.execute(
+            "SELECT subject, content, source, COALESCE(valid_from, created_at) AS since "
+            "FROM facts WHERE id=?", (fact_id,)).fetchone()
+        if old is None:
+            return False
+        subject = old["subject"] if subject is None else subject.lower().strip()
+        if (subject, content) == (old["subject"], old["content"]):
+            return True
+        self.conn.execute(
+            "INSERT INTO fact_history (fact_id, subject, content, source, valid_from, reason) "
+            "VALUES (?,?,?,?,?,?)",
+            (fact_id, old["subject"], old["content"], old["source"], old["since"], reason))
+        self.conn.execute(
+            "UPDATE facts SET content=?, subject=?, valid_from=datetime('now') WHERE id=?",
+            (content, subject, fact_id))
+        self.conn.commit()
+        return True
+
+    def delete(self, fact_id: int) -> bool:
+        """Forget a fact: the fact and its earlier versions both go."""
+        cur = self.conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+        self.conn.execute("DELETE FROM fact_history WHERE fact_id=?", (fact_id,))
         self.conn.commit()
         return cur.rowcount > 0
 
-    def delete(self, fact_id: int) -> bool:
-        cur = self.conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
-        self.conn.commit()
-        return cur.rowcount > 0
+    def history(self, fact_id: int) -> list[dict]:
+        """The fact's earlier versions, oldest first, each with when it was true."""
+        rows = self.conn.execute(
+            "SELECT subject, content, valid_from, valid_to, reason FROM fact_history "
+            "WHERE fact_id=? ORDER BY id", (fact_id,)).fetchall()
+        return [dict(r) for r in rows]
 
     def settle(self, timeout: float = 120.0) -> bool:
         """Already settled. The row and its FTS5 index land in one transaction,

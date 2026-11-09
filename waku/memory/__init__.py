@@ -102,8 +102,7 @@ class Memory:
 
     # ---- procedural
     def matching_skills(self, message: str) -> str:
-        matched = self.skills.match(message)
-        return "\n\n".join(f"### {s.name}\n{s.body}" for s in matched)
+        return "\n\n".join(f"### {s.name}\n{body}" for s, body in self.skills.load(message))
 
     # ---- write paths
     def log_chat(self, user_message: str, reply: str, session_id: str = "default",
@@ -125,8 +124,12 @@ class Memory:
     def session_history(self, session_id: str) -> list[tuple[str, str]]:
         """The (user, assistant) exchanges of one past session, in order — used
         to reload working memory when the user switches back to a conversation."""
+        import json
+
+        from waku.runtime.session import strip_tools_note
+
         rows = self.conn.execute(
-            "SELECT role, content FROM chat_log WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, meta FROM chat_log WHERE session_id = ? ORDER BY id",
             (session_id,),
         ).fetchall()
         pairs, pending = [], None
@@ -134,7 +137,18 @@ class Memory:
             if r["role"] == "user":
                 pending = r["content"]
             elif pending is not None:
-                pairs.append((pending, r["content"]))
+                # The model gets its [tools used: ...] note back: from meta,
+                # or, for a reply saved before the note moved there, cut down
+                # from the reply itself.
+                try:
+                    note = (json.loads(r["meta"] or "{}") or {}).get("tools_note") or ""
+                except (TypeError, ValueError):
+                    note = ""
+                reply = strip_tools_note(r["content"])
+                if not note and reply != (r["content"] or "").strip():
+                    old = r["content"][len(reply):].strip()
+                    note = old if len(old) <= 400 else old[:399] + "…]"
+                pairs.append((pending, f"{reply}\n{note}" if note else reply))
                 pending = None
         return pairs
 

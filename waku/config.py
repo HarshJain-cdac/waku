@@ -117,6 +117,40 @@ class Settings:
     # owner/name to assume when a call omits it — for when Waku runs outside a
     # checkout, where `gh` has no remote to infer from.
     gh_repo: str = field(default_factory=lambda: os.getenv("WAKU_GH_REPO", ""))
+    # Base URL of the NRL tender knowledge-graph precedent API (the read-only
+    # FastAPI service in the KG repo: webapp/precedent_api.py, default port
+    # 8077). Set it and the agent gains kg_precedent_search / kg_price_reference
+    # / kg_clause_lookup, so a NIT can quote real past tenders instead of
+    # approximating them. Unset (the default) and none of those tools register
+    # at all — the NIT wizard behaves exactly as it did before, which is why
+    # this is a URL rather than an on/off flag: there is nothing to turn on
+    # without a service to point at.
+    kg_url: str = field(default_factory=lambda: os.getenv("WAKU_KG_URL", "").strip())
+    # NRL's tender knowledge graph (/data2/nrl_dev/Harsh/KG), its read-only
+    # precedent API: the kg_* tools read it (waku/nam/kg_tools.py), while
+    # sap_search stays on WAKU_KG_URL. "mcp" reads the KG through WAKU_KG_URL.
+    kg_api_url: str = field(default_factory=lambda: os.getenv(
+        "WAKU_KG_API_URL", "http://127.0.0.1:8077").strip())
+    # Which KG tools the agent is given (waku/nam/kg_tools.py), comma separated:
+    # "" (the default) every one and NAM's PR Creation Flow tools; "sap_search"
+    # tests SAP alone; add "nam" for the flow's tools on SAP's records alone.
+    kg_tools: str = field(default_factory=lambda: os.getenv("WAKU_KG_TOOLS", "").strip())
+    # Only NRL procurement work is answered (waku/nam/domain.py): "" (the
+    # default) means on wherever kg_url is set; "1" on anywhere, "0" off.
+    domain_only: str = field(default_factory=lambda: os.getenv("WAKU_DOMAIN_ONLY", "").strip())
+    # The model per NAM task, in the order tried: "domain=m1,m2"
+    # (waku/nam/llm.py). A task left out gets the small model then the main.
+    nam_models: str = field(default_factory=lambda: os.getenv("WAKU_NAM_MODELS", "").strip())
+    # Answer a pure greeting ("hi", "thanks", "ok") from the intent node, with
+    # no model call at all. On by default because the inference endpoint here
+    # queues — one call has been measured between 1.6s and 21s — and making
+    # someone wait that long to be told "Hello" is the worst latency in the
+    # product. Set WAKU_FAST_GREETINGS=0 to send greetings through the model
+    # like any other message. Only messages made ENTIRELY of greeting words
+    # qualify; see waku/tools/intent.py.
+    fast_greetings: bool = field(
+        default_factory=lambda: os.getenv("WAKU_FAST_GREETINGS", "1") not in ("0", "false", "no")
+    )
     # Register the experimental tools (delegate_task -> pi sub-agent, ...). Env is
     # the global switch; the arena sets this per-race so a coding race can hand
     # work to pi WITHOUT flipping it on for the whole process.

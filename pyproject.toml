@@ -69,6 +69,15 @@ gcal = [
 discord = [
     "discord.py>=2.4",
 ]
+# NIT drafting: render the collected draft into the official .docx template,
+# and read the AAN/SCC/PQC/SOR files a user uploads during intake. The dashboard
+# upload path (waku/ops/dashboard.py _extract_text) has always needed these —
+# it imported them optimistically and failed at runtime if they were absent.
+nit = [
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "pypdf>=4.0",
+]
 # Optional gateway: WhatsApp via Meta Cloud API (needs a public URL — see docstring)
 whatsapp = [
     "httpx>=0.25",

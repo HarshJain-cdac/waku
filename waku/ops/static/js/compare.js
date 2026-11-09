@@ -425,7 +425,7 @@ function modelArenaView(d){
   return uiCard(`
     <div class="cmp-controls">
       <span class="meta cmp-blurb">One message, every brain at once — same harness, isolated homes, real receipts (gate · latency · cost · tools). Compare, don't guess.</span>
-      <label class="cmp-judge ${compareState.apple?"on":""}" style="margin-left:auto" title="Write create_event results to your REAL Apple Calendar (the 'Waku' calendar). Off by default so a race doesn't spam duplicates — when on, EACH model writes its own event (use 1-2 models).">
+      <label class="cmp-judge ${compareState.apple?"on":""}" style="margin-left:auto" title="Write create_event results to your REAL Apple Calendar (the assistant's calendar). Off by default so a race doesn't spam duplicates — when on, EACH model writes its own event (use 1-2 models).">
         <input type="checkbox" ${compareState.apple?"checked":""} onchange="toggleApple()"> write to calendar</label>
       <label class="cmp-judge ${compareState.coding?"on":""}" title="Coding task: enables the delegate_task tool so the loop can hand real coding work to a pi sub-agent on this card's own model — the full harness runs (gate, tools), delegate_task is one of them">
         <input type="checkbox" ${compareState.coding?"checked":""} onchange="toggleCoding()"> coding (pi)</label>
@@ -687,7 +687,7 @@ function memoryArenaView(){
   }
   if (memoryArenaFixture === null){
     return uiCard(`The probe file lives in <code>evals/memory_arena.json</code>,
-      which a packaged install does not ship. Run Waku from a clone to see it.`, {cls: "empty"});
+      which a packaged install does not ship. Run it from a clone to see it.`, {cls: "empty"});
   }
   const track = memoryArenaFixture.tracks[(maTrack && memoryArenaFixture.tracks[maTrack])
     ? maTrack : Object.keys(memoryArenaFixture.tracks)[0]];

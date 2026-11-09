@@ -49,3 +49,5 @@ jobs:
         run: python scripts/generate_env_example.py --check
       - name: Deterministic evals (offline tier — no API key in CI)
         run: python -m pytest -q evals/deterministic
+      - name: NAM harness metric report (routing, injection, consistency, end to end)
+        run: python scripts/nam_eval_report.py

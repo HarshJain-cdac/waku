@@ -18,7 +18,7 @@ const TITLES = {chat:"Chat & watch", ops:"LLM Ops",
                 "compare/models":"Model race — ten brains, one harness",
                 "compare/memory":"Memory race — one brain, five places to put facts",
                 settings:"Behaviour — how a turn runs",
-                database:"Database — everything Waku stores (state.db)"};
+                database:"Database — everything the agent stores (state.db)"};
 function render(){
   if (!D) return;
   const [v, subRaw] = (location.hash||"#overview").slice(1).split("/");
@@ -98,7 +98,17 @@ async function refresh(){
 }
 // --- resizable columns: drag the thin handle between nav|main and main|dock.
 // Width lives in a CSS var + localStorage, so it survives refreshes.
-function wireResizer(id, cssVar, key, fromRight, min, max){
+// Pulling the chat's handle past its widest split position takes the chat to
+// the full page; pulling it back right returns to the split. FULL_PULL is how
+// far past the limit the pointer must go, so a drag that merely reaches the
+// limit does not jump.
+const FULL_PULL = 80;
+// Not remembered: a reload always comes back to the page and the chat side
+// by side, so the home screen is never hidden behind a chat left full.
+function setDockFull(on){
+  document.body.classList.toggle("dock-full", on);
+}
+function wireResizer(id, cssVar, key, fromRight, min, max, full){
   const el = document.getElementById(id);
   if (!el) return;
   el.onmousedown = e => {
@@ -107,6 +117,12 @@ function wireResizer(id, cssVar, key, fromRight, min, max){
     const move = ev => {
       let w = fromRight ? (window.innerWidth - ev.clientX) : ev.clientX;
       const hi = typeof max === "function" ? Math.max(min, max()) : max;
+      if (full){
+        const isFull = document.body.classList.contains("dock-full");
+        if (!isFull && w > hi + FULL_PULL){ setDockFull(true); return; }
+        if (isFull && w > hi) return;          // still pulled out: stay full
+        if (isFull) setDockFull(false);
+      }
       w = Math.max(min, Math.min(hi, w));
       document.documentElement.style.setProperty(cssVar, w + "px");
       localStorage.setItem(key, w);
@@ -132,7 +148,7 @@ function wireChrome(){
     document.body.appendChild(p); const w = p.getBoundingClientRect().width; p.remove(); return w; };
   const dockMax = () => Math.min(680, window.innerWidth - rail.getBoundingClientRect().width
     - document.getElementById("dock-resizer").getBoundingClientRect().width - px("--main-min"));
-  wireResizer("dock-resizer", "--dock-w", "dockW", true, 260, dockMax);
+  wireResizer("dock-resizer", "--dock-w", "dockW", true, 260, dockMax, true);
   if (btn) btn.onclick = () => {
     const c = rail.classList.toggle("collapsed");
     btn.setAttribute("aria-expanded", String(!c));
@@ -151,7 +167,7 @@ function wireChrome(){
 // ("transcription failed [Errno …]"). WAV is trivially decodable server-side.
 let micCtx = null, micStream = null, micNode = null, micBuf = [], micOn = false;
 const micHint = (msg) => { const i = document.getElementById("dmsg");
-  if (i){ i.placeholder = msg; setTimeout(()=>{ i.placeholder = "Message Waku…"; }, 8000); } };
+  if (i){ i.placeholder = msg; setTimeout(()=>{ i.placeholder = "Message…"; }, 8000); } };
 
 async function toggleMic(){
   const btn = document.getElementById("mic");

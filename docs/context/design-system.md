@@ -18,6 +18,14 @@ this file before changing how anything looks.
   that edits the copied files is declined.
 - The design files and the Waku mark are not MIT; see `LICENSE-BRAND`. A fork
   replaces them.
+- **This deployment's colours are its own.** `waku/ops/static/theme.css`,
+  loaded after the design files and before `style.css`, restates the colour
+  tokens only: a pure white light theme and a neutral dark one (#18181B), with
+  a blue accent, under the same three selectors as `tokens.css` (light, dark
+  by the system, dark by choice). `evals/deterministic/test_dashboard_theme.py`
+  keeps it colour tokens only, both themes complete, and every text colour at
+  4.5:1 or more on each surface. Sizes, type and spacing stay the design
+  system's. The dashboard carries no product name or mark.
 
 ## Rules for CSS and inline styles
 
@@ -33,8 +41,8 @@ These apply to `style.css` and to any inline style written in `js/`:
   floating menu (`openMenu`, and a select's open list), which takes
   `--shadow-md`. Use a native `<select>` for a choice in a form: `style.css`
   draws its open list as the menu, so it needs no JavaScript.
-- **Amber is a surface, not a text colour.** Amber text uses `--accent-fg`, and
-  text on an amber fill uses `--accent-ink`.
+- **The accent is a surface, not a text colour.** Accent text uses
+  `--accent-fg`, and text on an accent fill uses `--accent-ink`.
 - **Buttons never fill.** There are four levels, all from `uiButton`:
   *primary* for the main action (paper ground, `--rule-hard` border, ink label:
   Save, Send), *secondary* (transparent, `--rule` border, muted label),

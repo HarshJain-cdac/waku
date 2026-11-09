@@ -65,10 +65,14 @@ def resume_or_new_session(conn) -> str:
     # Match by source, not id prefix: "+ New chat" makes 's-...' ids, so a
     # 'dashboard-%' filter would orphan those threads on restart. Every dashboard
     # message is tagged source='dashboard' — that's the reliable signal.
+    # The shared thread is also fed by /api/chat callers that send no thread
+    # id (source 'api'): a restart that skipped those started an empty thread
+    # mid-procurement, and the chat lost its open NAM case. Threads a client
+    # names itself ('px-...') are that client's, never the shared one.
     row = conn.execute(
         "SELECT session_id, MAX(created_at) AS last_at FROM chat_log "
-        "WHERE source='dashboard' GROUP BY session_id "
-        "ORDER BY last_at DESC LIMIT 1"
+        "WHERE source IN ('dashboard', 'api') AND session_id NOT LIKE 'px-%' "
+        "GROUP BY session_id ORDER BY last_at DESC LIMIT 1"
     ).fetchone()
     if row and row["last_at"]:
         try:

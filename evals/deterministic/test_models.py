@@ -14,7 +14,7 @@ def test_xai_grok_provider_uses_expected_key_endpoint_and_models(monkeypatch, tm
     captured = {}
 
     class StubOpenAICompatClient:
-        def __init__(self, *, api_key, base_url, timeout):
+        def __init__(self, *, api_key, base_url, timeout, fallback_model=None):
             captured.update(api_key=api_key, base_url=base_url, timeout=timeout)
 
     monkeypatch.setenv("XAI_API_KEY", "test-xai-key")
@@ -117,7 +117,7 @@ def test_deepseek_provider_uses_expected_key_endpoint_and_models(monkeypatch, tm
     captured = {}
 
     class StubOpenAICompatClient:
-        def __init__(self, *, api_key, base_url, timeout):
+        def __init__(self, *, api_key, base_url, timeout, fallback_model=None):
             captured.update(api_key=api_key, base_url=base_url, timeout=timeout)
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
@@ -144,7 +144,7 @@ def test_minimax_provider_uses_expected_key_endpoint_and_models(monkeypatch, tmp
     captured = {}
 
     class StubAnthropicClient:
-        def __init__(self, *, api_key, base_url, timeout):
+        def __init__(self, *, api_key, base_url, timeout, fallback_model=None):
             captured.update(api_key=api_key, base_url=base_url, timeout=timeout)
             self.messages = None
 

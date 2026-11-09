@@ -21,6 +21,7 @@ def main() -> None:
     problems: list[str] = []
     names: dict[str, Path] = {}
 
+    # the repo's skills, loaded by chat
     files = sorted((REPO / "skills").rglob("SKILL.md"))
     if not files:
         problems.append("no SKILL.md files found under skills/")
